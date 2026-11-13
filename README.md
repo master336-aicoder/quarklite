@@ -18,6 +18,8 @@
 2. 点击最新一次成功的构建
 3. 在 Artifacts 区域下载 `quarklite-apk`
 
+> Fork 本仓库后 CI 会**故意失败**：release 签名材料改为从仓库 Secrets 读取，缺任一 Secret 即中止，不再回退到 debug 签名（回退会产生无法覆盖安装的包）。配置清单见 [docs/operations.md](docs/operations.md) §1。
+
 ## 工作原理
 
 ```
@@ -37,6 +39,17 @@ Flutter App (UI)
 - 相册使用夸克返回的缩略图地址加载，点击可全屏查看并下载原图
 - 上传按服务端分片大小顺序直传 OSS，先算 MD5/SHA1 走秒传校验；
   上传页实时显示进度、速度与状态，支持取消 / 重试 / 清除已完成
+
+## 文档
+
+设计、需求、安全与运维文档在 [`docs/`](docs/README.md)，索引与各文档职责见 [docs/README.md](docs/README.md)。动手前至少看两篇：
+
+- 要构建 / 出包：[docs/build-and-env.md](docs/build-and-env.md)（工具链版本、`gopeed.exe` 放置、签名材料）
+- 要改代码或发布：[docs/operations.md](docs/operations.md)（CI Secrets 一次性配置、发版流程、故障排查）
+
+安全相关的现状与遗留风险：[docs/security-design.md](docs/security-design.md)；相对上游的加固改动与回滚：[docs/hardening-changelog.md](docs/hardening-changelog.md)。
+
+> 注：网盘凭据（夸克 cookie、迅雷 token、123 令牌）只写入系统安全存储，不再落明文副本；备份与近设备转移已在 manifest 层禁用。
 
 ## 本地构建
 
