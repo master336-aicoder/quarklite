@@ -84,6 +84,13 @@ class NetGuard {
       if (mapped) return true; // v4 映射地址一律按内部处理，避免绕过
       return false;
     }
+
+    // 到这里说明它不是合法四段点分十进制。真实 DNS 主机名的顶级标签至少含
+    // 一个字母，因此"全是数字和点"的写法只可能是 IP 别名（2130706433、127.1、
+    // 0177.0.0.1、0），单个 0x 前缀同理（0x7f000001）；这些形式浏览器与
+    // 多数库都会解析成回环/私网地址，一律按内部拒绝，避免绕过上面的四段判定。
+    if (RegExp(r'^[0-9.]+$').hasMatch(h)) return true;
+    if (RegExp(r'^0[xX][0-9a-fA-F]+$').hasMatch(h)) return true;
     return false;
   }
 

@@ -125,12 +125,12 @@ A-7 在 [.github/workflows/build.yml](file:///D:/qorder/quarklite/.github/workfl
 
 1. **协议必须 http/https**（[:43-50](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L43-L50)），
    `file:`/`javascript:`/自定义 scheme 直接不通过。
-2. **目标不得是内部地址**（[:59-88](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L59-L88)）：
+2. **目标不得是内部地址**（[:59-95](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L59-L95)；含 `2130706433`、`127.1`、`0x7f000001` 这类 IP 别名写法，见 [:92-93](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L92-L93)）：
    回环、`0/8`、`10/8`、`127/8`、`169.254/16`（含云厂商元数据口）、`172.16-31`、
    `192.168/16`、`100.64/10`、IPv6 `::1`、`fe80::/10`、`fc00::/7`（`fc` 与 `fd` 两个前缀都覆盖）、
    `::ffff:` 映射地址一律按内部处理（不做解析以免绕过）。
 3. **凭据只在调用方显式声明 `NetScope` 时才附带**，且 `NetScope.none` 直接拒绝
-   （[:93-99](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L93-L99)、
+   （[:100-106](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L100-L106)、
    [lib/state/download_service.dart:94-101](file:///D:/qorder/quarklite/lib/state/download_service.dart#L94-L101)）。
    `credentialScope` 是 **required** 参数，全部 10 个外部调用点都已声明（已 grep 核对）；
    新代码不声明就编译不过。
@@ -288,7 +288,7 @@ A-7 在 [.github/workflows/build.yml](file:///D:/qorder/quarklite/.github/workfl
 | T-1 | Actions 固定到 commit SHA | 官方建议 pin SHA（§7 A-6），但本次无法离线核对各 action 当前 SHA，填错会直接打断构建。留作专门一次改动 |
 | T-2 | 不再持久化 123 密码 | 会改变产品行为（token 过期后不再自动重登），需要用户侧确认 |
 | T-3 | `MANAGE_EXTERNAL_STORAGE` 换成 SAF/目录选择器 | 会牺牲"文件夹上传保持目录结构"能力（[README.md:11](file:///D:/qorder/quarklite/README.md#L11)） |
-| T-4 | 脱敏字段表的自动化回归测试 | 需要 Dart 工具链与 CI 挂载；当前 `test/` 未覆盖安全路径 |
+| T-4 | 脱敏字段表与安全守卫的自动化回归测试 | 本机已装到 Dart SDK 3.14.0，但 `test/` 现有用例依赖 `flutter_test`，进 CI 仍需 Flutter SDK；`NetGuard`/`PathGuard` 已固化为仓库内断言 [tool/guard_selfcheck.dart](file:///D:/qorder/quarklite/tool/guard_selfcheck.dart)（`dart run tool/guard_selfcheck.dart`，无需 Flutter）；`LogRedact` 依赖 Flutter 仍完全没覆盖 |
 | T-5 | `upload/download-artifact` 从 v4 升到 v7（官方最新 7.0.2，2026-11 核对） | 与加固无关的版本升级，混进同一批改动会让回滚边界不清 |
 | T-6 | DNS rebinding 防护（解析后校验 IP） | 需要引入自定义 `findProxy`/`badCertificateCallback` 逻辑，影响面大；列为 X-1 的长期方案 |
 | T-7 | iOS `IOSOptions.accessibility` 显式设为 `first_unlock` | 需要确认后台下载恢复时是否真的读凭据；改了会影响 Keychain 项迁移行为，未验证不动 |
@@ -299,7 +299,7 @@ A-7 在 [.github/workflows/build.yml](file:///D:/qorder/quarklite/.github/workfl
 
 | ID | 风险 | 影响 | 接受理由 |
 |---|---|---|---|
-| X-1 | 公网域名 DNS 解析到内网/元数据地址（rebinding），绕过 §4.2 的地址形态检查 | 凭据外泄 | 需要在 HTTP 层做解析后二次校验（T-6）；当前控制对"直接把 URL 写成内网地址"这一主要形态有效 |
+| X-1 | 公网域名 DNS 解析到内网/元数据地址（rebinding），绕过 §4.2 的地址形态检查 | 凭据外泄 | 需要在 HTTP 层做解析后二次校验（T-6）；当前控制对"直接把 URL 写成内网地址"这一主要形态有效（含十进制/八进制/十六进制/短写别名，已断言验证） |
 | X-2 | Windows 命令行里的 `-T token` 对同机其他进程可见 | 本机进程可冒充应用调用引擎 | 攻击者已具备同用户权限时，本来就能读应用内存；收益不足以引入 Gopeed 不支持的配置通道 |
 | X-3 | 两处 WebView 保留 `JavaScriptMode.unrestricted` | 页面脚本可操作注入的桥 | 关掉脚本会让风控验证与支付页不可用；已用"仅可信域注入"收窄 |
 | X-4 | CDN 迁移到新的第三方域时可能命中 §4.2 拦截（误拦，非漏拦） | 下载失败并给出原因串 | 失败可见、可诊断，比静默把凭据送出去好 |
@@ -405,3 +405,4 @@ A-7 在 [.github/workflows/build.yml](file:///D:/qorder/quarklite/.github/workfl
 3. "v2/v3-only 签名的 APK 是否真的不含 v1 块"取决于 AGP 与 minSdk 组合，
    属推断（A-13），未逐字核对官方文句。
 4. 所有代码层控制的**运行时效果**均未实测（原因见 hardening-changelog.md §5）。
+   例外：`NetGuard` 与 `PathGuard` 是零依赖纯函数，已跑过仓库内断言集 [tool/guard_selfcheck.dart](file:///D:/qorder/quarklite/tool/guard_selfcheck.dart)（75 条）（首跑暴露 3 条 IP 别名绕过，已修 [net_guard.dart:92-93](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L92-L93)）；该断言集不依赖 Flutter，已可离线重跑；接入 CI 仍受 T-4 限制（缺 Flutter SDK）。

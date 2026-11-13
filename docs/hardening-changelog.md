@@ -2,10 +2,11 @@
 
 本文逐条记录本次安全加固相对上游代码的改动：每条给出「加固前证据 → 风险 → 加固后落点 → 兼容性影响 → 回滚方式」。
 
-- **加固前**一律指 `HEAD = 5ba21acb7dfbf7cc3ccf660b9ac59220aa3b8e98`（2026-10-17，即本次克隆下来的上游提交）的文件与行号，取自 `git show HEAD:<path>`。
+- **加固前**一律指基线提交 `5ba21acb7dfbf7cc3ccf660b9ac59220aa3b8e98`（2026-10-17，本次克隆下来的上游 HEAD）的文件与行号，取自 `git show 5ba21ac:<path>`。
+- 加固内容已作为 `7facbaf`（代码）与 `c8eb10a`（文档）提交，因此**回滚命令一律写死 `5ba21ac`，不要用 `HEAD`** —— 现在的 HEAD 已经包含加固本身。
 - **加固后**一律指当前工作区的文件与行号。
 - 风险编号（H1/H2/M1…）与威胁登记（R-01…R-18）的对应关系见 [security-design.md](security-design.md) §3。
-- ⚠ 本文所有 Dart 改动**均未经过编译器或运行时验证**，原因见 §5.2。
+- ⚠ Dart 改动已过**解析级**校验，`net_guard.dart` / `path_guard.dart` 另过完整静态分析与行为断言；但**全量类型检查、编译与运行时验证仍未做**（缺 Flutter SDK），边界见 §5.1 / §5.2。
 
 ---
 
@@ -46,7 +47,7 @@
 | 加固前 | 加固后 |
 |---|---|
 | `xunlei_state.dart:173-183` `_read`：安全存储异常后 `prefs.getString(key)` 明文回退 | [xunlei_state.dart:169](../lib/state/xunlei_state.dart#L169) `_read` 单行委托 `CredentialStore.I.read` |
-| `xunlei_state.dart:185-194` `_write`：`_secure.write` + `prefs.setString(key, value)`（[191-192](../lib/state/xunlei_state.dart) 为 HEAD 行号） | [xunlei_state.dart:171-174](../lib/state/xunlei_state.dart#L171)：只写安全存储；保留上游 `value.isEmpty` 早退语义 |
+| `xunlei_state.dart:185-194` `_write`：`_secure.write` + `prefs.setString(key, value)`（[191-192](../lib/state/xunlei_state.dart) 为基线行号） | [xunlei_state.dart:171-174](../lib/state/xunlei_state.dart#L171)：只写安全存储；保留上游 `value.isEmpty` 早退语义 |
 | `xunlei_state.dart:127-135` logout 循环里双份删除 | [xunlei_state.dart:129-131](../lib/state/xunlei_state.dart#L129)：删除 + `purgeLegacyPlaintext` |
 | `netdisk123_state.dart:46-48` 单账号键、`368-370` 把 token/username/password 复制进 3 个额外键、`389`+`393` 双写 | [netdisk123_state.dart:376-381](../lib/state/netdisk123_state.dart#L376) 统一走 `CredentialStore`；多账号只存 `_kAccounts` 一个 JSON 键；[368-374](../lib/state/netdisk123_state.dart#L368) `purgeCredentialDuplicates()` 清掉迁移残留与旧明文键 |
 
@@ -69,13 +70,13 @@
 
 #### 2.1.5 回滚
 
-`git checkout HEAD -- lib/state/app_state.dart lib/state/xunlei_state.dart lib/state/netdisk123_state.dart` 并删除 `lib/core/credential_store.dart`（注意 [app.dart:83-88](../lib/app.dart#L83) 会引用它，需同步还原 `app.dart`）。
+`git checkout 5ba21ac -- lib/state/app_state.dart lib/state/xunlei_state.dart lib/state/netdisk123_state.dart` 并删除 `lib/core/credential_store.dart`（注意 [app.dart:83-88](../lib/app.dart#L83) 会引用它，需同步还原 `app.dart`）。
 
 ---
 
 ### 2.2 H2：本地引擎 REST 无鉴权
 
-| 项 | 加固前（HEAD） | 加固后 |
+| 项 | 加固前（`5ba21ac`） | 加固后 |
 |---|---|---|
 | token 来源 | 无 | [gopeed_boot.dart:44-51](../lib/core/gopeed/gopeed_boot.dart#L44)：进程内首次使用时 `Random.secure` 生成 32 字节、base64url 去填充 |
 | Windows 启动参数 | `gopeed_boot.dart:194` `'-T', ''` | [gopeed_boot.dart:210](../lib/core/gopeed/gopeed_boot.dart#L210) `'-T', _token` |
@@ -87,7 +88,7 @@
 
 **未验证项**：token 是否真的被引擎接受，依赖 Gopeed 版本的 `-T` / `X-Api-Token` 语义；本次没有启动过引擎（§5.2）。另外 token 通过命令行 `-T` 传递，同机用户可从进程列表读到（遗留风险 X-2）。
 
-回滚：`git checkout HEAD -- lib/core/gopeed/gopeed_boot.dart lib/core/gopeed/gopeed_client.dart`。
+回滚：`git checkout 5ba21ac -- lib/core/gopeed/gopeed_boot.dart lib/core/gopeed/gopeed_client.dart`。
 
 ---
 
@@ -122,8 +123,9 @@
 
 - [43](../lib/utils/net_guard.dart#L43) `parseHttp`：只放行 http/https 绝对 URL。
 - [53](../lib/utils/net_guard.dart#L53) `isTorrentUri`：限制 BT/magnet 的 scheme 形状。
-- [59-88](../lib/utils/net_guard.dart#L59) `isInternalHost`：环回、RFC1918、CGNAT `100.64/10`（[73](../lib/utils/net_guard.dart#L73)）、链路本地 `169.254/16` 与云 metadata（[70](../lib/utils/net_guard.dart#L70)）、IPv6 `::1` / `fe80::/10` / `fc00::/7`（[80-82](../lib/utils/net_guard.dart#L80)，`fc` 与 `fd` 两个前缀都覆盖 —— 早期只判 `fd` 漏了一半）、以及 IPv4-mapped `::ffff:`（[83](../lib/utils/net_guard.dart#L83)）。
-- [93-99](../lib/utils/net_guard.dart#L93) `credentialRejection`、[102](../lib/utils/net_guard.dart#L102) `isTrustedPage` 配 [34-38](../lib/utils/net_guard.dart#L34) 的 `trustedPageSuffixes` 域表。
+- [59-95](../lib/utils/net_guard.dart#L59) `isInternalHost`：环回、RFC1918、CGNAT `100.64/10`（[73](../lib/utils/net_guard.dart#L73)）、链路本地 `169.254/16` 与云 metadata（[70](../lib/utils/net_guard.dart#L70)）、IPv6 `::1` / `fe80::/10` / `fc00::/7`（[80-82](../lib/utils/net_guard.dart#L80)，`fc` 与 `fd` 两个前缀都覆盖 —— 早期只判 `fd` 漏了一半）、以及 IPv4-mapped `::ffff:`（[83](../lib/utils/net_guard.dart#L83)）。
+- [92-93](../lib/utils/net_guard.dart#L92) **IP 别名形式**：`2130706433`、`127.1`、`0177.0.0.1`、`0`、`0x7f000001` 一律按内部地址拒绝。 这三条判定是**行为自检跑出来的补丁**：首版只认四段点分十进制，`http://2130706433:9999/` 会被判成公网并把 cookie 带出去，详见 §5.1 末三行。
+- [100-106](../lib/utils/net_guard.dart#L100) `credentialRejection`、[109-119](../lib/utils/net_guard.dart#L109) `isTrustedPage` 配 [34-38](../lib/utils/net_guard.dart#L34) 的 `trustedPageSuffixes` 域表。
 
 调用点：
 
@@ -131,7 +133,7 @@
 |---|---|
 | [download_service.dart:33](../lib/state/download_service.dart#L33) | cookie 非空时，若目标是内网/环回则拒绝创建任务并给出用户可见原因 |
 | [download_service.dart:145-147](../lib/state/download_service.dart#L145) | 非法 BT scheme 拒绝并记 `LogRedact.url` |
-| [download_service.dart:107](../lib/state/download_service.dart#L107) | 加固前是 `if (cookie.isNotEmpty) 'Cookie': cookie`（HEAD 第 91 行，无条件附 cookie）；现在由 `attachCredential` 决定 |
+| [download_service.dart:107](../lib/state/download_service.dart#L107) | 加固前是 `if (cookie.isNotEmpty) 'Cookie': cookie`（基线第 91 行，无条件附 cookie）；现在由 `attachCredential` 决定 |
 | [xunlei_review_page.dart:69](../lib/pages/login/xunlei_review_page.dart#L69)、[91](../lib/pages/login/xunlei_review_page.dart#L91) | 只在受信域注入 bridge |
 | [netdisk123_pay_page.dart:32-40](../lib/pages/drive/netdisk123_pay_page.dart#L32) | 充值页：`parseHttp` 失败即 `prevent`；离开 123 域只记 INFO（该页不注入凭据） |
 
@@ -159,7 +161,7 @@
 
 ### 2.6 M3：WebView
 
-加固前 `xunlei_review_page.dart:51-68`：`onPageStarted`（55-58）与 `onPageFinished`（59-62）**各自无条件**调用 `_injectBridge()`，且该方法当时**不接受 url 参数**（`_injectBridge()` 定义在 HEAD 第 71 行），既没有 `onNavigationRequest`，也没有任何域名判断。也就是说凭据 bridge 注入到了导航到达的任意页面 —— 一次跳转/重定向就能把 cookie 送出去。
+加固前 `xunlei_review_page.dart:51-68`：`onPageStarted`（55-58）与 `onPageFinished`（59-62）**各自无条件**调用 `_injectBridge()`，且该方法当时**不接受 url 参数**（`_injectBridge()` 定义在基线第 71 行），既没有 `onNavigationRequest`，也没有任何域名判断。也就是说凭据 bridge 注入到了导航到达的任意页面 —— 一次跳转/重定向就能把 cookie 送出去。
 
 加固后 [xunlei_review_page.dart:60-91](../lib/pages/login/xunlei_review_page.dart#L60)：
 
@@ -202,13 +204,13 @@
 
 ### 2.9 H3：CI 与签名
 
-| 加固前（HEAD `.github/workflows/build.yml`） | 加固后 |
+| 加固前（`5ba21ac` 的 `.github/workflows/build.yml`） | 加固后 |
 |---|---|
 | 第 57 行 `actions/cache` 缓存 keystore、第 68 行 `keytool -genkeypair` 现场生成、第 71/77/79 行口令 `quarklite2026` 明文写在公开 workflow 里 | [build.yml:63-81](../.github/workflows/build.yml#L63) 先断言 4 个 Secret 齐备，[83-103](../.github/workflows/build.yml#L83) 从 Secret 还原 keystore 并用 `keytool -list` 自检；口令全在 Secrets（一次性配置见 [operations.md](operations.md) §1） |
 | 第 101 行 job 沿用仓库默认宽权限 | [17-18](../.github/workflows/build.yml#L17) `permissions: contents: read`；[180-181](../.github/workflows/build.yml#L180) 只有 `publish-release` 拿 `contents: write` |
 | — | [105-116](../.github/workflows/build.yml#L105) `pubspec.lock` 一致性断言（上游出现过声明依赖在 lock 里没有条目） |
 | debug 签名断言用 `keytool -printcert -jarfile`（**只读 v1**；无 v1 块时输出为空 → `grep CN=Android Debug` 永不匹配 → 断言静默通过） | [130-164](../.github/workflows/build.yml#L130) apksigner 优先、找不到才 `keytool` 兜底并 WARN、**两者都无输出即 exit 1** |
-| gradle 缺 `key.properties` 时静默用 debug 签名（HEAD `build.gradle.kts:51`） | [build.gradle.kts:47-66](../android/app/build.gradle.kts#L47)：WARN + 支持 `-Pquarklite.requireReleaseSigning=true` 直接失败；CI 里由 [build.yml:122-128](../.github/workflows/build.yml#L122) 的 `GRADLE_OPTS` 传入 |
+| gradle 缺 `key.properties` 时静默用 debug 签名（`5ba21ac` 的 `build.gradle.kts:51`） | [build.gradle.kts:47-66](../android/app/build.gradle.kts#L47)：WARN + 支持 `-Pquarklite.requireReleaseSigning=true` 直接失败；CI 里由 [build.yml:122-128](../.github/workflows/build.yml#L122) 的 `GRADLE_OPTS` 传入 |
 
 > 移除 `actions/cache` 复用 keystore 是安全修复的一部分：原方案让「谁能读这个公开仓库」等于「谁能产出同签名 APK」。
 
@@ -248,6 +250,7 @@
 | [android/app/src/main/res/xml/network_security_config.xml](../android/app/src/main/res/xml/network_security_config.xml) | 30 | 禁明文 + 信任锚 |
 | [android/app/src/main/res/xml/data_extraction_rules.xml](../android/app/src/main/res/xml/data_extraction_rules.xml) | 32 | 云备份/近设备转移排除 |
 | [LICENSE](../LICENSE) | 674 | GPL-3.0 全文 |
+| [tool/guard_selfcheck.dart](../tool/guard_selfcheck.dart) | 99 | `NetGuard`/`PathGuard` 的 75 条离线断言，`dart run tool/guard_selfcheck.dart` |
 | docs/*.md | — | 需求、架构、安全设计、构建环境、运维、本对照表 |
 
 ---
@@ -268,30 +271,37 @@
 
 ## 5. 验证状态
 
-### 5.1 已执行的检查（全部是静态检查，没有运行仓库代码）
+### 5.1 已执行的检查
+
+前六行是纯静态检查，没有执行仓库代码；最后两行**真的运行了**仓库里的两个纯函数文件
+（`net_guard.dart` / `path_guard.dart` 不 import 任何包，跑它们不会触碰 Flutter、网络或下载引擎）。
 
 | 检查 | 命令/方式 | 结果 |
 |---|---|---|
-| Dart 结构平衡 | 自写 `dart_balance.py`（括号/引号/注释感知的扫描器） | 60 个文件，结构问题 0 |
+| Dart 结构平衡 | 自写 `dart_balance.py`（括号/引号/注释感知的扫描器）—— 本机没有 Dart 工具链时的替代手段，现已被下面正式的 `dart format` 解析校验取代，保留记录 | 60 个文件，结构问题 0 |
 | XML 良构 | Python `xml.dom.minidom.parse`（manifest + 两个新 xml） | 通过 |
 | YAML 良构 | `npx --yes js-yaml` 解析两个 workflow | 通过 |
 | Shell 语法 | `bash -n scripts/build_libgopeed.sh` | 通过 |
 | LICENSE 完整性 | sha256 与 GNU 发布文本比对 | 一致 |
 | 悬空引用 | grep 确认：`_kCookieBackup` 在 lib/ 内 0 处；三个 state 类不再出现任何 `prefs.setString(<凭据键>, …)`；`FlutterSecureStorage` 与 `_secure` 只存在于 `credential_store.dart` 内部（定义 + 3 处调用），调用方一律走 `CredentialStore` | 通过 |
 | 文档行号引用 | 自写引用校验脚本，核对文档里每条 `文件#Lxx` 的标签/URL 一致性与范围有效性 | TOTAL BAD: 0 |
+| **Dart 解析（SDK 3.14.0）** | `dart format --output=none lib test`（只解析不改写） | 62 个文件全部解析通过，exit 0；无 parse error |
+| **Dart 静态分析** | `dart analyze lib/utils/net_guard.dart lib/utils/path_guard.dart` | `No issues found!`（这两个文件不 import 任何包，是完整的类型检查，不是只看语法） |
+| **守卫行为自检** | [tool/guard_selfcheck.dart](../tool/guard_selfcheck.dart) 断言 75 条用例（内网判定 / scheme 白名单 / 凭据投递 / 域表欺骗 / 文件名净化 / 拼接越界） | 首跑 **3 条失败**：`2130706433`、`127.1`、`0x7f000001` 未被判为内部地址 → 修 [net_guard.dart:92-93](../lib/utils/net_guard.dart#L92) → 复跑 75/75 通过；已固化进仓库，改守卫文件后重跑 |
 
-### 5.2 **未执行**（结论未经这些验证支撑）
+### 5.2 **仍未执行**（结论未经这些验证支撑）
 
-- 没有 `dart analyze` / `flutter analyze`：本机没有 Dart/Flutter SDK（PATH 无 `dart`、`flutter`；离线下载 SDK 未能完成）。
+- **全量类型检查没做**：只分析了 `net_guard.dart` / `path_guard.dart` 两个无依赖文件。其余改动都 import Flutter 包，本机只有 Dart SDK、没有 Flutter SDK，`pub get` 跑不起来，`dart analyze` 会把"包解析不到"和真错误混在一起，没有判别价值，因此没做。
+- 语法解析通过 **不等于** 类型正确：改错的成员名、参数类型、可空性都还要靠 `flutter analyze` 才能暴露。
 - 没有 `flutter test`：`test/` 下的用例一次都没跑过。
 - 没有构建过 APK/AAR/gopeed.exe，没有连接过任何真机或模拟器。
 - 没有跑过 GitHub Actions。**因此 §2.9 的 Secrets 清单、§2.2 的 token 生效、§2.7 的域表命中都只有代码级依据，没有运行级证据。**
-- 日志脱敏、路径净化、内网判定都**没有安全回归测试**（待办，见 [security-design.md](security-design.md) §5）。
-- 加固只做了静态改写，**没有对任何行为做端到端验证**；交付时请把它当作「待验证的补丁集」，不要直接发版。
+- 日志脱敏（`LogRedact` 在 app_logger.dart，依赖 Flutter）**没有任何测试覆盖**。`NetGuard`/`PathGuard` 的 75 条断言已进仓库（[tool/guard_selfcheck.dart](../tool/guard_selfcheck.dart)），但它不在 `flutter test` 的目录扫描范围内的自动回归链路里（需要 `dart run`，CI 目前没有 Dart-only 步骤）——把它接进 CI 仍是要办（见 [security-design.md](security-design.md) §5 T-4）。
+- 除上述纯函数外，加固的**端到端行为一律未验证**（凭据是否真的不再落明文、token 是否真被引擎接受、APK 是否真拒绝明文 HTTP）；交付时请把它当作「已过语法与局部静态检查、待全量编译与真机验证的补丁集」，不要直接发版。
 
 ### 5.3 换行符说明（一次自我更正）
 
-改写过程中若干文件被写成 CRLF，一度判断为「会破坏构建」。核查 `.git/config` 后确认本机 `core.autocrlf=true`，且 `HEAD` 里的 blob 是 LF —— 仓库内容与 CI 不受影响，仅工作区显示差异。**先前的「构建会被破坏」判断已撤回**，本次未据此改动任何代码逻辑。
+改写过程中若干文件被写成 CRLF，一度判断为「会破坏构建」。核查 `.git/config` 后确认本机 `core.autocrlf=true`，且 `5ba21ac` 里的 blob 是 LF —— 仓库内容与 CI 不受影响，仅工作区显示差异。**先前的「构建会被破坏」判断已撤回**，本次未据此改动任何代码逻辑。
 
 ---
 
@@ -301,25 +311,25 @@
 
 ```bash
 # H1 凭据（会连带需要还原 app.dart 的 purge 调用）
-git checkout HEAD -- lib/state/app_state.dart lib/state/xunlei_state.dart lib/state/netdisk123_state.dart lib/app.dart
+git checkout 5ba21ac -- lib/state/app_state.dart lib/state/xunlei_state.dart lib/state/netdisk123_state.dart lib/app.dart
 rm lib/core/credential_store.dart
 
 # H2 + M5 引擎
-git checkout HEAD -- lib/core/gopeed/gopeed_boot.dart lib/core/gopeed/gopeed_client.dart lib/core/gopeed/ios_background_download_client.dart
+git checkout 5ba21ac -- lib/core/gopeed/gopeed_boot.dart lib/core/gopeed/gopeed_client.dart lib/core/gopeed/ios_background_download_client.dart
 
 # M1 + M2 出网与路径
-git checkout HEAD -- lib/state/download_service.dart lib/pages/drive/drive_page.dart lib/pages/drive/xunlei_drive_page.dart lib/pages/drive/netdisk123_drive_page.dart
+git checkout 5ba21ac -- lib/state/download_service.dart lib/pages/drive/drive_page.dart lib/pages/drive/xunlei_drive_page.dart lib/pages/drive/netdisk123_drive_page.dart
 rm lib/utils/net_guard.dart lib/utils/path_guard.dart
 
 # M3 WebView
-git checkout HEAD -- lib/pages/login/xunlei_review_page.dart lib/pages/drive/netdisk123_pay_page.dart lib/pages/parse/netdisk123_share_page.dart lib/pages/parse/share_files_page.dart
+git checkout 5ba21ac -- lib/pages/login/xunlei_review_page.dart lib/pages/drive/netdisk123_pay_page.dart lib/pages/parse/netdisk123_share_page.dart lib/pages/parse/share_files_page.dart
 
 # M4 + L8
-git checkout HEAD -- android/app/src/main/AndroidManifest.xml lib/utils/app_logger.dart
+git checkout 5ba21ac -- android/app/src/main/AndroidManifest.xml lib/utils/app_logger.dart
 rm android/app/src/main/res/xml/network_security_config.xml android/app/src/main/res/xml/data_extraction_rules.xml
 
 # H3 + M6 CI
-git checkout HEAD -- .github/workflows/build.yml .github/workflows/diag-gopeed.yml android/app/build.gradle.kts scripts/build_libgopeed.sh
+git checkout 5ba21ac -- .github/workflows/build.yml .github/workflows/diag-gopeed.yml android/app/build.gradle.kts scripts/build_libgopeed.sh
 ```
 
 > ⚠ 回滚 H1 后，加固期间新写入的凭据只存在于安全存储中，旧代码的明文回退读不到它们 —— 表现为升级用户（相对回滚版本而言）需要重新登录。回滚 H3 前请先确认没有把 `upload-keystore.jks` 从 CI 里删除，否则回到「现场生成 keystore」意味着**换签名**，已安装设备无法覆盖安装（[operations.md](operations.md) §3）。

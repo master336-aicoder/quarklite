@@ -162,7 +162,7 @@ Quarklite 是一个跨平台的网盘下载客户端，把"官方网盘接口 + 
 - **NFR-2 凭据不随备份外流。** Android 关闭 `allowBackup`，并配置 `dataExtractionRules`
   排除全部域（[android/app/src/main/AndroidManifest.xml:36-39](file:///D:/qorder/quarklite/android/app/src/main/AndroidManifest.xml#L36-L39)）。
 - **NFR-3 凭据只投递给声明过的目标。** 下载 URL 必须通过出网校验，
-  内网/链路本地/云元数据地址一律拦截（[lib/utils/net_guard.dart:93-99](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L93-L99)）。
+  内网/链路本地/云元数据地址一律拦截（[lib/utils/net_guard.dart:100-106](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L100-L106)）。
 - **NFR-4 本机服务不可被第三方进程调用。** 本地引擎 REST 每次启动使用随机 token 鉴权
   （[lib/core/gopeed/gopeed_boot.dart:44-52](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_boot.dart#L44-L52)）。
 - **NFR-5 传输加密默认开启。** 生产构建不允许明文 HTTP 回流

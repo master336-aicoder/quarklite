@@ -170,9 +170,9 @@ $ANDROID_HOME/build-tools/<ver>/apksigner verify --print-certs app-release.apk
 
 | 提示 | 触发条件 | 位置 |
 |---|---|---|
-| `下载地址指向内网/元数据地址，已拦截` | 目标解析到回环/私网/链路本地/CGNAT | [lib/utils/net_guard.dart:97](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L97) |
-| `下载地址必须是 http/https 绝对地址` | 非 http(s)、缺协议或缺主机 | [lib/utils/net_guard.dart:96](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L96) |
-| `未声明凭据投递范围，拒绝附带凭据` | 调用方传了 `NetScope.none` 却带 cookie | [lib/utils/net_guard.dart:94](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L94) |
+| `下载地址指向内网/元数据地址，已拦截` | 目标解析到回环/私网/链路本地/CGNAT | [lib/utils/net_guard.dart:104](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L104) |
+| `下载地址必须是 http/https 绝对地址` | 非 http(s)、缺协议或缺主机 | [lib/utils/net_guard.dart:103](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L103) |
+| `未声明凭据投递范围，拒绝附带凭据` | 调用方传了 `NetScope.none` 却带 cookie | [lib/utils/net_guard.dart:101](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L101) |
 | `仅支持 magnet: 或 btth: 链接` | 磁力输入框里粘了 http 地址 | [lib/state/download_service.dart:147](file:///D:/qorder/quarklite/lib/state/download_service.dart#L147) |
 | `下载路径非法: …` | 目标路径含上级引用 | [lib/core/gopeed/gopeed_client.dart:48-49](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_client.dart#L48-L49) |
 
@@ -246,6 +246,9 @@ $ANDROID_HOME/build-tools/<ver>/apksigner verify --print-certs app-release.apk
    填错会直接打断构建。见 [security-design.md](security-design.md) §5 待办。
 3. `upload-artifact` / `download-artifact` 仍是 v4，官方最新版为 v7.0.2（2026-11 核对），
    升级留待一次专门改动验证，未混进加固提交。
-4. 没有自动回归测试覆盖安全路径（`test/` 目录与这些守卫无关），
-   §4.3 的拦截行为目前只能人工验证。
+4. 安全路径**没有进入 `flutter test` 回归**（`test/` 与这些守卫无关）。已固化的只有
+   [tool/guard_selfcheck.dart](file:///D:/qorder/quarklite/tool/guard_selfcheck.dart)：75 条纯 Dart 断言，覆盖 §4.3 的
+   内网/别名判定与文件名净化，改 `net_guard.dart` / `path_guard.dart` 后必须
+   `dart run tool/guard_selfcheck.dart` 重跑（本机有 Dart SDK 就能跑，不需要 Flutter）。
+   依赖引擎与网络栈的拦截（明文 HTTP 被拒、无 token 401、日志真的落盘脱敏）仍只能人工验证。
 5. iOS 未接入 CI 构建（workflow 名即 `Build Android`）。
