@@ -160,7 +160,7 @@ Quarklite 是一个跨平台的网盘下载客户端，把"官方网盘接口 + 
   不允许再向 `SharedPreferences` 写可读副本。安全存储不可用时**不降级**，
   显式提示重新登录（[lib/core/credential_store.dart:6-20](file:///D:/qorder/quarklite/lib/core/credential_store.dart#L6-L20)）。
 - **NFR-2 凭据不随备份外流。** Android 关闭 `allowBackup`，并配置 `dataExtractionRules`
-  排除全部域（[android/app/src/main/AndroidManifest.xml:36-39](file:///D:/qorder/quarklite/android/app/src/main/AndroidManifest.xml#L36-L39)）。
+  排除全部域（[android/app/src/main/AndroidManifest.xml:39-42](file:///D:/qorder/quarklite/android/app/src/main/AndroidManifest.xml#L39-L42)）。
 - **NFR-3 凭据只投递给声明过的目标。** 下载 URL 必须通过出网校验，
   内网/链路本地/云元数据地址一律拦截（[lib/utils/net_guard.dart:100-106](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L100-L106)）。
 - **NFR-4 本机服务不可被第三方进程调用。** 本地引擎 REST 每次启动使用随机 token 鉴权

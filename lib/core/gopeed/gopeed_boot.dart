@@ -364,6 +364,23 @@ class GopeedEngine {
     return '$head …[中间省略 ${s.length - limit} 字符]… $tail';
   }
 
+  /// UTF-16LE 字节序列（不含 BOM）。
+  ///
+  /// `powershell -EncodedCommand` 要求 Base64(UTF-16LE)，而 dart:convert 里
+  /// 没有可用的 UTF-16 编解码器（`utf16` 全局实例已被移除，
+  /// `Encoding.getByName('utf-16le')` 返回 null），只能按 codeUnits 手拼小端。
+  /// 传入的脚本是纯 ASCII，不涉及代理对；与 CPython `str.encode('utf-16-le')`
+  /// 逐字节一致，已用 PowerShell 端解码回读验证。
+  static List<int> _utf16LeBytes(String s) {
+    final units = s.codeUnits;
+    final out = List<int>.filled(units.length * 2, 0);
+    for (var i = 0; i < units.length; i++) {
+      out[2 * i] = units[i] & 0xff;
+      out[2 * i + 1] = (units[i] >> 8) & 0xff;
+    }
+    return out;
+  }
+
   /// 杀掉残留的引擎进程，释放 bolt 数据库文件锁。
   ///
   /// 只处理可执行文件位于本次启动所用 exe 同目录的实例——加固前用
@@ -389,7 +406,7 @@ Get-CimInstance Win32_Process -Filter "Name='gopeed.exe'" | ForEach-Object {
 }
 Write-Output "killed=$hit"
 ''';
-    final encoded = base64.encode(utf16.encode(script));
+    final encoded = base64.encode(_utf16LeBytes(script));
     try {
       final r = await Process.run(
         'powershell.exe',

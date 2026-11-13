@@ -3,6 +3,9 @@
 // 之所以不用 package:test：仓库现有 test/ 依赖 flutter_test，而这两组守卫是零依赖
 // 纯函数，能在没有 Flutter 工具链的机器上直接跑，改动 net_guard/path_guard 后必须重跑。
 // 退出码非 0 表示有断言失败。
+// 故意用相对路径 import lib/ 下的文件、并用 print 输出：
+// 这样只装 Dart SDK、连 `pub get` 都没跑过的机器也能直接执行本文件。
+// ignore_for_file: avoid_relative_lib_imports, avoid_print
 import '../lib/utils/net_guard.dart';
 import '../lib/utils/path_guard.dart';
 

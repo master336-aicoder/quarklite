@@ -98,17 +98,22 @@ class LogRedact {
   static const _placeholder = '[已脱敏]';
 
   /// 凭据类键名：值一律替换掉。
+  ///
+  /// 大小写不敏感只能靠 `caseSensitive: false`——Dart 的 RegExp 是 ECMAScript
+  /// 语法，模式串里写内联 `(?i)` 会直接抛 FormatException。
   static final RegExp _kv = RegExp(
-    r'''(?i)(["']?(cookie|set-cookie|authorization|x-captcha-token|x-client-secret|'''
+    r'''(["']?(cookie|set-cookie|authorization|x-captcha-token|x-client-secret|'''
     r'''access_token|refresh_token|api_token|token|auth_key|signature|sign|'''
     r'''pwd|password|secret|client_secret|creditkey|credit_key|__puus|__pus|__kp|'''
     r'''device_id|deviceId)["']?\s*[:=]\s*["']?)([^"'\\\s&,;}\]]+)''',
+    caseSensitive: false,
   );
 
   /// JSON 里的凭据字段：`"cookie":"xxx"` 之外还要兜住嵌套结构里的字符串值。
   static final RegExp _jsonStr = RegExp(
-    r'''(?i)("(?:cookie|authorization|password|secret|token|creditkey|'''
+    r'''("(?:cookie|authorization|password|secret|token|creditkey|'''
     r'''access_token|refresh_token|auth_key)"\s*:\s*")((?:[^"\\]|\\.)*)(")''',
+    caseSensitive: false,
   );
 
   /// 任意文本脱敏（日志主入口）。

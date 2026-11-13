@@ -246,9 +246,10 @@ $ANDROID_HOME/build-tools/<ver>/apksigner verify --print-certs app-release.apk
    填错会直接打断构建。见 [security-design.md](security-design.md) §5 待办。
 3. `upload-artifact` / `download-artifact` 仍是 v4，官方最新版为 v7.0.2（2026-11 核对），
    升级留待一次专门改动验证，未混进加固提交。
-4. 安全路径**没有进入 `flutter test` 回归**（`test/` 与这些守卫无关）。已固化的只有
-   [tool/guard_selfcheck.dart](file:///D:/qorder/quarklite/tool/guard_selfcheck.dart)：75 条纯 Dart 断言，覆盖 §4.3 的
-   内网/别名判定与文件名净化，改 `net_guard.dart` / `path_guard.dart` 后必须
-   `dart run tool/guard_selfcheck.dart` 重跑（本机有 Dart SDK 就能跑，不需要 Flutter）。
+4. 安全断言**已经写好，但流水线一个都不跑**：`build.yml` 里只有 §2.10 那条锁文件断言，
+   既没有 `flutter analyze` 也没有 `flutter test`。目前两套用例都靠人工执行：
+   - [tool/guard_selfcheck.dart](file:///D:/qorder/quarklite/tool/guard_selfcheck.dart)：**69 条**纯 Dart 断言（实跑计数，早期文档写的 75 是调用点估算），覆盖 §4.3 的内网/别名判定与文件名净化。改 `net_guard.dart` / `path_guard.dart` 后必须 `dart run tool/guard_selfcheck.dart` 重跑（只要 Dart SDK，不需要 Flutter）。
+   - [test/log_redact_test.dart](file:///D:/qorder/quarklite/test/log_redact_test.dart)：9 条 `flutter test` 用例，盯日志脱敏真的生效。2026-11-13 的实跑就是靠它和全量 analyze 抓到 3 个加固自身缺陷（[hardening-changelog.md §5.5](hardening-changelog.md)）。
+   接进 CI 的建议姿势与两个坑（`--fatal-infos` 默认 on；`dart format --set-exit-if-changed` 基线就红）见本节末尾与 [hardening-changelog.md §5.4](hardening-changelog.md)。
    依赖引擎与网络栈的拦截（明文 HTTP 被拒、无 token 401、日志真的落盘脱敏）仍只能人工验证。
 5. iOS 未接入 CI 构建（workflow 名即 `Build Android`）。

@@ -17,7 +17,10 @@ class GopeedClient implements DownloadClient {
           connectTimeout: const Duration(seconds: 5),
           receiveTimeout: const Duration(seconds: 10),
           headers: {
-            if (apiToken.isNotEmpty) HttpHeaders.authorizationHeader: 'Bearer $apiToken',
+            // 字面量而非 dart:io 的 HttpHeaders.authorizationHeader：
+            // 本文件不依赖 dart:io，才能在没有平台插件的环境下被单测引用。
+            // HTTP 头名大小写不敏感，Gopeed 侧按标准头解析。
+            if (apiToken.isNotEmpty) 'Authorization': 'Bearer $apiToken',
           },
         ));
 

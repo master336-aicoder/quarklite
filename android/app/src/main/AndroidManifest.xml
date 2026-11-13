@@ -20,11 +20,14 @@
       dataExtractionRules    —— Android 12（API 31）起的备份/转移规则；Android 11 及以下
                                 由 allowBackup 兜住。部分厂商 ROM 上 D2D 文件迁移无法关闭。
       networkSecurityConfig  —— API 24 起生效；release 禁止明文 HTTP 且只信任系统 CA。
-      usesCleartextTraffic   —— targetSdk 28+ 默认已是 false，但该属性对 API 23 及以下
-                                仍是唯一手段（官方要求 NSC 之外再显式声明），
-                                且 targetSdk 38+ 后会被忽略，长期机制是上面的 NSC。
+      usesCleartextTraffic   —— targetSdk 28+ 默认已是 false。历史上它是 API 23 及以下
+                                的唯一手段，但本应用 minSdk 取 flutter.minSdkVersion=24
+                                （Flutter 3.50.0 / FlutterExtension.kt:26，build.gradle.kts:29
+                                未覆盖），API<=23 的设备根本装不上，因此该属性恒为无效，
+                                仅按下方说明保留。真正的明文流量约束全在 NSC。
       requestLegacyExternalStorage —— 仅在 target Android 10 时有效；本应用 targetSdk 取自
-                                flutter.targetSdkVersion（远高于 30），该标志实际被系统忽略，
+                                flutter.targetSdkVersion=36（FlutterExtension.kt:34），
+                                远高于 29，该标志实际被系统忽略，
                                 全部文件访问能力来自 MANAGE_EXTERNAL_STORAGE。保留以免误判。
     -->
     <application

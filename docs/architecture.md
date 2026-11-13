@@ -184,7 +184,7 @@ pages/state 层                    CredentialStore                     平台安
   [lib/core/credential_store.dart:1](file:///D:/qorder/quarklite/lib/core/credential_store.dart#L1)。
 - 构造参数逐字沿用上游写法 `AndroidOptions(encryptedSharedPreferences: true)`
   （[lib/core/credential_store.dart:30](file:///D:/qorder/quarklite/lib/core/credential_store.dart#L30)，
-  对照 `git show HEAD:lib/state/app_state.dart` 第 39-41 行）。
+  对照 `git show 5ba21ac:lib/state/app_state.dart` 第 39-41 行）。
   原因：现网安装包的既有值就是这种格式写的，插件两种模式**共用同一个
   `FlutterSecureStorage` 文件名**，改参数会让老设备读不出原凭据（升级即全员掉登录），
   而不是"换一种更安全的存储"。

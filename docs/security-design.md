@@ -92,10 +92,10 @@ A-7 在 [.github/workflows/build.yml](file:///D:/qorder/quarklite/.github/workfl
 
 - 入口类：[lib/core/credential_store.dart:22-45](file:///D:/qorder/quarklite/lib/core/credential_store.dart#L22-L45)
 - 夸克侧改造：[lib/state/app_state.dart:90-114](file:///D:/qorder/quarklite/lib/state/app_state.dart#L90-L114)
-  （对照加固前 `git show HEAD:lib/state/app_state.dart` 第 101-112 行的"双写持久化"）
+  （对照加固前 `git show 5ba21ac:lib/state/app_state.dart` 第 101-112 行的"双写持久化"）
 - 123 侧不再把凭据复制进 `_kToken/_kUsername/_kPassword`：
   [lib/state/netdisk123_state.dart:368-374](file:///D:/qorder/quarklite/lib/state/netdisk123_state.dart#L368-L374)
-  （对照 `git show HEAD:lib/state/netdisk123_state.dart` 第 368-370 行）
+  （对照 `git show 5ba21ac:lib/state/netdisk123_state.dart` 第 368-370 行）
 - 明文副本清理：[lib/core/credential_store.dart:81-100](file:///D:/qorder/quarklite/lib/core/credential_store.dart#L81-L100)，
   启动时机见 [lib/app.dart:70-92](file:///D:/qorder/quarklite/lib/app.dart#L70-L92)
 - 全仓库对 `FlutterSecureStorage` 的引用只剩一处（已 grep 核对）。
@@ -117,7 +117,7 @@ A-7 在 [.github/workflows/build.yml](file:///D:/qorder/quarklite/.github/workfl
 ### 4.2 凭据投递范围显式化（R-04、R-17）
 
 **问题结构**：`addDirectUrl` 同时持有"用户/服务端给的 URL"和"网盘凭据"，
-加固前只要 cookie 非空就无条件附带（`git show HEAD:lib/state/download_service.dart` 第 91 行：
+加固前只要 cookie 非空就无条件附带（`git show 5ba21ac:lib/state/download_service.dart` 第 91 行：
 `if (cookie.isNotEmpty) 'Cookie': cookie`）。
 一个指向 `169.254.169.254` 或内网服务的 URL 就能把会话 Cookie 送出去。
 
@@ -214,9 +214,10 @@ A-7 在 [.github/workflows/build.yml](file:///D:/qorder/quarklite/.github/workfl
 ### 4.6 传输与备份（R-02、R-08）
 
 - Manifest 现在的四个开关：
-  [android/app/src/main/AndroidManifest.xml:35-39](file:///D:/qorder/quarklite/android/app/src/main/AndroidManifest.xml#L35-39)
+  [android/app/src/main/AndroidManifest.xml:38-42](file:///D:/qorder/quarklite/android/app/src/main/AndroidManifest.xml#L38-L42)
   （加固前同一位置是 `android:usesCleartextTraffic="true"`，见
-  `git show HEAD:android/app/src/main/AndroidManifest.xml` 第 22 行）。
+  `git show 5ba21ac:android/app/src/main/AndroidManifest.xml` 第 22 行；**不要用 HEAD**，
+  HEAD 已经包含加固后的代码）。
 - NSC：release 禁止明文且只信任系统 CA；debug 构建才追加用户 CA，
   保住抓包排障能力
   （[android/app/src/main/res/xml/network_security_config.xml:17-30](file:///D:/qorder/quarklite/android/app/src/main/res/xml/network_security_config.xml#L17-L30)）。
@@ -235,7 +236,7 @@ A-7 在 [.github/workflows/build.yml](file:///D:/qorder/quarklite/.github/workfl
 日志是唯一落盘出口，脱敏放在这一处，新增调用点自动生效：
 
 - 出口：[lib/utils/app_logger.dart:44-46](file:///D:/qorder/quarklite/lib/utils/app_logger.dart#L44-L46)
-  （加固前是无条件 `$msg`，见 `git show HEAD:lib/utils/app_logger.dart` 第 44 行）。
+  （加固前是无条件 `$msg`，见 `git show 5ba21ac:lib/utils/app_logger.dart` 第 44 行）。
 - 规则：[lib/utils/app_logger.dart:95-130](file:///D:/qorder/quarklite/lib/utils/app_logger.dart#L95-L130)
   覆盖 `key=value`、JSON 字符串值、URL query 三类形态；
   字段表包含 cookie/authorization/set-cookie/各类 token/signature/sign/pwd/password/
@@ -254,7 +255,7 @@ A-7 在 [.github/workflows/build.yml](file:///D:/qorder/quarklite/.github/workfl
 见 [operations.md](operations.md) §1-§2 与 [build-and-env.md](build-and-env.md) §2-§3。要点：
 
 - 签名材料只来自 4 个 Secrets；公开 workflow 里不再有口令
-  （加固前：`git show HEAD:.github/workflows/build.yml` 第 68-79 行把
+  （加固前：`git show 5ba21ac:.github/workflows/build.yml` 第 68-79 行把
   `quarklite2026` 写死在 `keytool -genkeypair` 与 `key.properties` 里，
   第 57 行还有一步 `Cache keystore`）。
 - 三道断言：Secrets 齐全、`keytool -list` 自检、**APK 非 debug 签名**
@@ -288,7 +289,7 @@ A-7 在 [.github/workflows/build.yml](file:///D:/qorder/quarklite/.github/workfl
 | T-1 | Actions 固定到 commit SHA | 官方建议 pin SHA（§7 A-6），但本次无法离线核对各 action 当前 SHA，填错会直接打断构建。留作专门一次改动 |
 | T-2 | 不再持久化 123 密码 | 会改变产品行为（token 过期后不再自动重登），需要用户侧确认 |
 | T-3 | `MANAGE_EXTERNAL_STORAGE` 换成 SAF/目录选择器 | 会牺牲"文件夹上传保持目录结构"能力（[README.md:11](file:///D:/qorder/quarklite/README.md#L11)） |
-| T-4 | 脱敏字段表与安全守卫的自动化回归测试 | 本机已装到 Dart SDK 3.14.0，但 `test/` 现有用例依赖 `flutter_test`，进 CI 仍需 Flutter SDK；`NetGuard`/`PathGuard` 已固化为仓库内断言 [tool/guard_selfcheck.dart](file:///D:/qorder/quarklite/tool/guard_selfcheck.dart)（`dart run tool/guard_selfcheck.dart`，无需 Flutter）；`LogRedact` 依赖 Flutter 仍完全没覆盖 |
+| T-4 | 把守卫断言与单测接进 CI | **测试覆盖已补齐，缺的是流水线执行点**。`LogRedact` 有 [test/log_redact_test.dart](file:///D:/qorder/quarklite/test/log_redact_test.dart)（9 条，`flutter test` 11/11 通过），`NetGuard`/`PathGuard` 有 [tool/guard_selfcheck.dart](file:///D:/qorder/quarklite/tool/guard_selfcheck.dart)（69 条，`dart run`，无需 Flutter）。而 `build.yml` 至今**不跑 analyze 也不跑 test**（只有 §2.10 那条锁文件断言），所以这些用例现在只能靠人工执行——§5.5 那 3 个缺陷正是「本地跑了、CI 没跑」的代价 |
 | T-5 | `upload/download-artifact` 从 v4 升到 v7（官方最新 7.0.2，2026-11 核对） | 与加固无关的版本升级，混进同一批改动会让回滚边界不清 |
 | T-6 | DNS rebinding 防护（解析后校验 IP） | 需要引入自定义 `findProxy`/`badCertificateCallback` 逻辑，影响面大；列为 X-1 的长期方案 |
 | T-7 | iOS `IOSOptions.accessibility` 显式设为 `first_unlock` | 需要确认后台下载恢复时是否真的读凭据；改了会影响 Keychain 项迁移行为，未验证不动 |
@@ -396,13 +397,22 @@ A-7 在 [.github/workflows/build.yml](file:///D:/qorder/quarklite/.github/workfl
 
 ### 8.3 未复核项（诚实声明）
 
-1. `flutter.minSdkVersion` / `flutter.targetSdkVersion` 的实际数值未取到（本机无 Flutter 工具链）。
-   §4.6 关于"API ≤23 需要显式 `usesCleartextTraffic`"的写法按"两种情况都成立"处理：
-   加上该属性在任何 minSdk 下都无害。
+1. ~~`flutter.minSdkVersion` / `flutter.targetSdkVersion` 的实际数值未取到（本机无 Flutter 工具链）~~
+   **已取到（2026-11-13，Flutter 3.50.0 装好之后）**：本仓库 `android/app/build.gradle.kts:18,29,30`
+   三项全部直接取 Flutter 注入值，没有本地覆盖；SDK 侧的默认值写在
+   `flutter/packages/flutter_tools/gradle/src/main/kotlin/FlutterExtension.kt:23,26,34`
+   —— **compileSdk 36 / minSdk 24 / targetSdk 36**。
+   由此 §4.6 的判断可以收紧而不是"两种情况都成立"：minSdk=24 意味着 API ≤23 的设备根本装不上，
+   `usesCleartextTraffic` 这个属性在本机上**恒为无效**（不是"无害"，是"没有作用对象"）；
+   明文流量约束实际完全由 `network_security_config.xml` 承担。属性按 §4 的口径保留未删。
+   同理 `requestLegacyExternalStorage`（manifest:38）确认无效：targetSdk 36 ≫ 29。
 2. `apksigner` 在 `ubuntu-latest` runner 上的具体路径布局未实测；
    CI 步骤做了 `ANDROID_HOME/build-tools/*/apksigner` 探测 + keytool 兜底 +
    "无输出即失败"三重处理，任一路径出问题都不会静默通过。
 3. "v2/v3-only 签名的 APK 是否真的不含 v1 块"取决于 AGP 与 minSdk 组合，
    属推断（A-13），未逐字核对官方文句。
-4. 所有代码层控制的**运行时效果**均未实测（原因见 hardening-changelog.md §5）。
-   例外：`NetGuard` 与 `PathGuard` 是零依赖纯函数，已跑过仓库内断言集 [tool/guard_selfcheck.dart](file:///D:/qorder/quarklite/tool/guard_selfcheck.dart)（75 条）（首跑暴露 3 条 IP 别名绕过，已修 [net_guard.dart:92-93](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L92-L93)）；该断言集不依赖 Flutter，已可离线重跑；接入 CI 仍受 T-4 限制（缺 Flutter SDK）。
+4. 所有代码层控制的**运行时效果**仍未在真机/产物上实测（原因见 hardening-changelog.md §5.2、§5.4 末行）。
+   已实测的例外有两类：
+   - `NetGuard` 与 `PathGuard` 是零依赖纯函数，跑过仓库内断言集 [tool/guard_selfcheck.dart](file:///D:/qorder/quarklite/tool/guard_selfcheck.dart)（实跑 **69 条**，首跑暴露 3 条 IP 别名绕过，已修 [net_guard.dart:92-93](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L92-L93)）；不依赖 Flutter，可离线重跑。
+   - `LogRedact` 跑过 [test/log_redact_test.dart](file:///D:/qorder/quarklite/test/log_redact_test.dart)（9 条，`flutter test`）。**这组用例不是锦上添花**：它盯的正是「正则能不能构造出来」，而 [hardening-changelog.md §5.5](hardening-changelog.md) 缺陷 3 记录了此前的 `(?i)` 写法会让每条日志抛异常、脱敏形同不存在。
+   另外全量 `flutter analyze` 已跑：0 error，相对基线 `5ba21ac` 新增问题 0 项。

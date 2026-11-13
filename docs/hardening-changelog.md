@@ -3,10 +3,11 @@
 本文逐条记录本次安全加固相对上游代码的改动：每条给出「加固前证据 → 风险 → 加固后落点 → 兼容性影响 → 回滚方式」。
 
 - **加固前**一律指基线提交 `5ba21acb7dfbf7cc3ccf660b9ac59220aa3b8e98`（2026-10-17，本次克隆下来的上游 HEAD）的文件与行号，取自 `git show 5ba21ac:<path>`。
-- 加固内容已作为 `7facbaf`（代码）与 `c8eb10a`（文档）提交，因此**回滚命令一律写死 `5ba21ac`，不要用 `HEAD`** —— 现在的 HEAD 已经包含加固本身。
+- 加固内容已作为 `7facbaf`（代码）、`c8eb10a`（文档）、`40bac12`（IP 别名判定 + 守卫断言）提交到 `pa` 远端，因此**回滚命令一律写死 `5ba21ac`，不要用 `HEAD`** —— 现在的 HEAD 已经包含加固本身。
+- **§5.5 的 3 个缺陷修复是 2026-11-13 全量验证之后才做的，目前只在工作区，尚未提交**。也就是说 `40bac12` 那个提交**编译不过**（2 个 error）且日志脱敏形同不存在。要出包必须先取工作区的修复。
 - **加固后**一律指当前工作区的文件与行号。
 - 风险编号（H1/H2/M1…）与威胁登记（R-01…R-18）的对应关系见 [security-design.md](security-design.md) §3。
-- ⚠ Dart 改动已过**解析级**校验，`net_guard.dart` / `path_guard.dart` 另过完整静态分析与行为断言；但**全量类型检查、编译与运行时验证仍未做**（缺 Flutter SDK），边界见 §5.1 / §5.2。
+- ⚠ Dart 改动已过**全量 `flutter analyze`**（0 error，相对基线新增问题 0 项）与 `flutter test`；**仍未做出包编译、真机与 CI 验证**。边界与实跑数据见 §5.4，被这些检查抓出来的自身缺陷见 §5.5。
 
 ---
 
@@ -20,7 +21,7 @@
 | 4 | M1 | 凭据被投递到任意/内网主机（SSRF 相邻） | [net_guard.dart](../lib/utils/net_guard.dart)、[download_service.dart:33](../lib/state/download_service.dart#L33) | 可能拒绝内网自建源，见 §2.4.4 |
 | 5 | M2 | 下载路径穿越 / 文件名注入 | [path_guard.dart](../lib/utils/path_guard.dart)、[gopeed_client.dart:48-50](../lib/core/gopeed/gopeed_client.dart#L48) | 超长名被截断 |
 | 6 | M3 | WebView 无导航校验即注入凭据 bridge | [xunlei_review_page.dart:60-91](../lib/pages/login/xunlei_review_page.dart#L60)、[netdisk123_pay_page.dart:32-40](../lib/pages/drive/netdisk123_pay_page.dart#L32) | 迅雷风控域变更需改配置 |
-| 7 | M4 | release 允许明文 HTTP | [AndroidManifest.xml:37](../android/app/src/main/AndroidManifest.xml#L37)、[network_security_config.xml](../android/app/src/main/res/xml/network_security_config.xml) | 明文源下载失败（预期） |
+| 7 | M4 | release 允许明文 HTTP | [AndroidManifest.xml:40](../android/app/src/main/AndroidManifest.xml#L40)、[network_security_config.xml](../android/app/src/main/res/xml/network_security_config.xml) | 明文源下载失败（预期） |
 | 8 | L8 | 日志泄露 cookie/token/URL 签名 | [app_logger.dart:43-131](../lib/utils/app_logger.dart#L43) | 日志可读性下降 |
 | 9 | H3 | CI 签名口令明文 + debug 签名静默兜底 + 断言失效 | [build.yml](../.github/workflows/build.yml)、[build.gradle.kts:47-66](../android/app/build.gradle.kts#L47) | **需要一次性配置 Secrets** |
 | 10 | M6 | 引擎源码 tag 可漂移 / 共享 /tmp / 工具链 @latest | [build_libgopeed.sh](../scripts/build_libgopeed.sh) | 需设 `GOPEED_COMMIT` |
@@ -178,12 +179,12 @@
 
 | 文件 | 加固前 | 加固后 |
 |---|---|---|
-| [AndroidManifest.xml](../android/app/src/main/AndroidManifest.xml) | 第 22 行 `android:usesCleartextTraffic="true"` | [37](../android/app/src/main/AndroidManifest.xml#L37) `="false"`；[36](../android/app/src/main/AndroidManifest.xml#L36) `allowBackup="false"`；[38](../android/app/src/main/AndroidManifest.xml#L38) `dataExtractionRules`；[39](../android/app/src/main/AndroidManifest.xml#L39) `networkSecurityConfig` |
+| [AndroidManifest.xml](../android/app/src/main/AndroidManifest.xml) | 第 22 行 `android:usesCleartextTraffic="true"` | [40](../android/app/src/main/AndroidManifest.xml#L40) `="false"`；[39](../android/app/src/main/AndroidManifest.xml#L39) `allowBackup="false"`；[41](../android/app/src/main/AndroidManifest.xml#L41) `dataExtractionRules`；[42](../android/app/src/main/AndroidManifest.xml#L42) `networkSecurityConfig` |
 | [network_security_config.xml](../android/app/src/main/res/xml/network_security_config.xml) | 不存在 | 新增（30 行）：`base-config` cleartext=false，只信任 `system`/`user` 信任锚；注释说明 cleartext 默认值随 targetSdk 的变化与 API 24 / ≤23 / 38+ 的适用性 |
 | [data_extraction_rules.xml](../android/app/src/main/res/xml/data_extraction_rules.xml) | 不存在 | 新增（32 行）：`cloud-backup` 与 `device-transfer` 双排除（含 `device_sharedpref`/`device_file`/`device_database`/`device_root`），注释记录 OEM D2D 迁移无法完全关闭的厂商现实 |
 | [app.dart](../lib/app.dart) iOS | 无 | `Info.plist` / entitlements 侧未改动，见 §4 |
 
-注：加固前 manifest 还带着 `fullBackupContent="false"`。这个布尔写法在官方文档里没有明确语义（该属性期望的是文件名），已移除并把语义收敛到 `allowBackup=false` + `dataExtractionRules`。`requestLegacyExternalStorage`（[35](../android/app/src/main/AndroidManifest.xml#L35)）**保留**：它在 targetSdk>10 时无效，但本仓库 targetSdk 取自 Flutter 注入值、本次无法离线确证，删掉属于不可验证的改动 —— 注释（[26-28](../android/app/src/main/AndroidManifest.xml#L26)）写明了这一点。
+注：加固前 manifest 还带着 `fullBackupContent="false"`。这个布尔写法在官方文档里没有明确语义（该属性期望的是文件名），已移除并把语义收敛到 `allowBackup=false` + `dataExtractionRules`。`requestLegacyExternalStorage`（[38](../android/app/src/main/AndroidManifest.xml#L38)）**保留**：它在 targetSdk>10 时无效。当时「本仓库 targetSdk 取自 Flutter 注入值、无法离线确证」的说法**已在 2026-11-13 补上实证**——`build.gradle.kts:30` 直接用 `flutter.targetSdkVersion`，Flutter 3.50.0 的默认值是 **36**（`FlutterExtension.kt:34`），所以该标志确定被系统忽略；不删它是为了不扩大改动面，注释（[28-31](../android/app/src/main/AndroidManifest.xml#L28)）写明了这一点。
 
 ---
 
@@ -245,12 +246,13 @@
 | 文件 | 行数 | 职责 |
 |---|---|---|
 | [lib/core/credential_store.dart](../lib/core/credential_store.dart) | 101 | 凭据读写唯一入口 + `secureAvailable` + 旧明文清理 |
-| [lib/utils/net_guard.dart](../lib/utils/net_guard.dart) | 113 | URL 合法性、内部地址判定、受信页面域表 |
+| [lib/utils/net_guard.dart](../lib/utils/net_guard.dart) | 120 | URL 合法性、内部地址判定、受信页面域表 |
 | [lib/utils/path_guard.dart](../lib/utils/path_guard.dart) | 64 | 文件名净化、穿越判定、受控拼接 |
 | [android/app/src/main/res/xml/network_security_config.xml](../android/app/src/main/res/xml/network_security_config.xml) | 30 | 禁明文 + 信任锚 |
 | [android/app/src/main/res/xml/data_extraction_rules.xml](../android/app/src/main/res/xml/data_extraction_rules.xml) | 32 | 云备份/近设备转移排除 |
 | [LICENSE](../LICENSE) | 674 | GPL-3.0 全文 |
-| [tool/guard_selfcheck.dart](../tool/guard_selfcheck.dart) | 99 | `NetGuard`/`PathGuard` 的 75 条离线断言，`dart run tool/guard_selfcheck.dart` |
+| [tool/guard_selfcheck.dart](../tool/guard_selfcheck.dart) | 102 | `NetGuard`/`PathGuard` 的离线断言（实跑 69 条），`dart run tool/guard_selfcheck.dart`，不需要 Flutter |
+| [test/log_redact_test.dart](../test/log_redact_test.dart) | 76 | `LogRedact` 的 9 条 `flutter test` 行为断言（§5.5 缺陷 3 的回归用例） |
 | docs/*.md | — | 需求、架构、安全设计、构建环境、运维、本对照表 |
 
 ---
@@ -259,7 +261,7 @@
 
 | 项 | 不改的原因 |
 |---|---|
-| 不删除 `requestLegacyExternalStorage` | targetSdk 由 Flutter 注入、离线无法确证；删除属于不可验证的行为改动。改为在注释里标明其在 target>10 时无效。 |
+| 不删除 `requestLegacyExternalStorage` | 当时「targetSdk 由 Flutter 注入、离线无法确证」，删除属于不可验证的行为改动。2026-11-13 已确证 targetSdk=36（依据见 [security-design.md](security-design.md) §8.3-1），该标志**确定无效**；仍不删是为了不扩大改动面，注释里写明了实测值。 |
 | 不对下载 URL 做厂商域白名单 | 网盘直链主机名随机轮换，白名单会让正常下载大面积失败。仅约束「是否附带凭据」。 |
 | 不阻止非受信域导航 | 风控人机验证必须能跳到第三方域；改为「放行导航 + 拒绝注入凭据」。 |
 | 不改 `encryptedSharedPreferences` 的值 | 会破坏已安装设备的解密（§2.1.4）。上游写法本就是 `true`，本次把它原样搬进 `CredentialStore` 并加了为什么必须是 `true` 的注释。 |
@@ -273,8 +275,9 @@
 
 ### 5.1 已执行的检查
 
-前六行是纯静态检查，没有执行仓库代码；最后两行**真的运行了**仓库里的两个纯函数文件
+前六行是纯静态检查，没有执行仓库代码；最后三行**真的运行了**仓库里的代码
 （`net_guard.dart` / `path_guard.dart` 不 import 任何包，跑它们不会触碰 Flutter、网络或下载引擎）。
+本节是「本机只有 Dart SDK」时期的记录，已被 §5.4 的 Flutter 全量验证取代其中「未做」的部分，按原样保留。
 
 | 检查 | 命令/方式 | 结果 |
 |---|---|---|
@@ -285,11 +288,15 @@
 | LICENSE 完整性 | sha256 与 GNU 发布文本比对 | 一致 |
 | 悬空引用 | grep 确认：`_kCookieBackup` 在 lib/ 内 0 处；三个 state 类不再出现任何 `prefs.setString(<凭据键>, …)`；`FlutterSecureStorage` 与 `_secure` 只存在于 `credential_store.dart` 内部（定义 + 3 处调用），调用方一律走 `CredentialStore` | 通过 |
 | 文档行号引用 | 自写引用校验脚本，核对文档里每条 `文件#Lxx` 的标签/URL 一致性与范围有效性 | TOTAL BAD: 0 |
-| **Dart 解析（SDK 3.14.0）** | `dart format --output=none lib test`（只解析不改写） | 62 个文件全部解析通过，exit 0；无 parse error |
+| **Dart 解析（SDK 3.14.0）** | `dart format --output=none lib test`（只解析不改写） | 62 个文件全部解析通过，exit 0；无 parse error。**注意**：「解析通过」不等于「格式合规」——`--set-exit-if-changed` 口径下基线 49/59、加固后 54/64 文件会被重排，见 §5.4 与 §5.5 勘误表 |
 | **Dart 静态分析** | `dart analyze lib/utils/net_guard.dart lib/utils/path_guard.dart` | `No issues found!`（这两个文件不 import 任何包，是完整的类型检查，不是只看语法） |
-| **守卫行为自检** | [tool/guard_selfcheck.dart](../tool/guard_selfcheck.dart) 断言 75 条用例（内网判定 / scheme 白名单 / 凭据投递 / 域表欺骗 / 文件名净化 / 拼接越界） | 首跑 **3 条失败**：`2130706433`、`127.1`、`0x7f000001` 未被判为内部地址 → 修 [net_guard.dart:92-93](../lib/utils/net_guard.dart#L92) → 复跑 75/75 通过；已固化进仓库，改守卫文件后重跑 |
+| **守卫行为自检** | [tool/guard_selfcheck.dart](../tool/guard_selfcheck.dart) 断言（内网判定 / scheme 白名单 / 凭据投递 / 域表欺骗 / 文件名净化 / 拼接越界） | 首跑 **3 条失败**：`2130706433`、`127.1`、`0x7f000001` 未被判为内部地址 → 修 [net_guard.dart:92-93](../lib/utils/net_guard.dart#L92) → 复跑全通过；已固化进仓库，改守卫文件后重跑。**条数更正**：此处原写「75 条」是按 49 处 `chk()` 调用点的展开估算，实跑输出 69 条 `PASS`、0 条 `FAIL`（§5.4） |
 
 ### 5.2 **仍未执行**（结论未经这些验证支撑）
+
+> **本节时间戳：装 Flutter SDK 之前。** 其中「全量类型检查」「flutter test」「LogRedact 无覆盖」三条
+> 已由 §5.4 的实际执行取代（并且 §5.4 里跑出来的结果证明这三项确实抓到了真缺陷）；
+> 「构建 APK/AAR/gopeed.exe」「真机」「GitHub Actions 实跑」到今天**仍然没做**。原文按只增不改的原则保留。
 
 - **全量类型检查没做**：只分析了 `net_guard.dart` / `path_guard.dart` 两个无依赖文件。其余改动都 import Flutter 包，本机只有 Dart SDK、没有 Flutter SDK，`pub get` 跑不起来，`dart analyze` 会把"包解析不到"和真错误混在一起，没有判别价值，因此没做。
 - 语法解析通过 **不等于** 类型正确：改错的成员名、参数类型、可空性都还要靠 `flutter analyze` 才能暴露。
@@ -302,6 +309,51 @@
 ### 5.3 换行符说明（一次自我更正）
 
 改写过程中若干文件被写成 CRLF，一度判断为「会破坏构建」。核查 `.git/config` 后确认本机 `core.autocrlf=true`，且 `5ba21ac` 里的 blob 是 LF —— 仓库内容与 CI 不受影响，仅工作区显示差异。**先前的「构建会被破坏」判断已撤回**，本次未据此改动任何代码逻辑。
+
+### 5.4 Flutter 全量验证（2026-11-13 实跑）
+
+本机装上 Flutter 3.50.0 stable（内含 Dart 3.14.0）后，把 §5.2 里「没做」的全量检查真正跑了一遍。
+SDK 从 `storage.flutter-io.cn` 取（先做四源 Range 测速，镜像 15.7 MB/s vs 官方 GCS 0.27 MB/s），
+下载后**先校验再解压**：`sha256 = 35fb843409c80a1c69b64bbae1756bba437222f909622d83540e266e1759aab8`，
+与官方 `releases_windows.json` 记录的哈希逐字节一致，`zipfile.testzip()` 无坏条目，23286 个条目。
+
+| 检查 | 命令 | 结果 |
+|---|---|---|
+| 工具链 | `flutter --version` | Flutter 3.50.0 / framework `ab2912035e` / engine `bf601093ad` / **Dart 3.14.0** / DevTools 2.61.0。SDK 内部的 `git fetch --tags` 因本机 CRL 失败退出 128，但不影响命令本身成功（与克隆仓库时同一个 TLS 问题） |
+| 依赖解析 | `flutter pub get` | 17 个依赖版本变更，**新增 `url_launcher` 与 7 个平台包**；补齐后 `pubspec.yaml` 声明的 18 个依赖在 lock 里 0 缺失（改前缺 `flutter_miuix`、`url_launcher`）→ §2.10 的锁文件断言确实能拦下提交前的状态，不是摆设 |
+| 全量静态分析 | `flutter analyze` | 首轮 **72 项：2 error / 27 warning / 43 info**；修掉那 2 个 error 与 2 个 `valid_regexps` info 后 → **70 项：0 error / 27 warning / 43 info** |
+| 是否新增噪声 | 建 `5ba21ac` 的 detached worktree，同样 `pub get` + `analyze` 对比 | 基线 **71 项（0/27/44）**；按 (严重级, 文件, 规则名) 三元组求差集：**加固新增 0 项**，反而消除 1 项——`xunlei_review_page.dart` 上 `_status` 的 `prefer_final_fields`。消除它的原因值得记一笔：加固新增了一处运行时赋值 `_status = '验证链接非法，已拒绝加载'`（[xunlei_review_page.dart:55](../lib/pages/login/xunlei_review_page.dart#L55)）；但该字段**从基线到今天都只写不读**（`unused_field` 两边都在），所以那句拒绝提示**用户在界面上根本看不到**，只有 `AppLogger` 记了一行。残留的 27 warning + 43 info **全部是上游既有**，以 `package:flutter/material.dart` 的 `deprecated_member_use` 和未用变量/导入为主 |
+| 单元测试 | `flutter test` | **11 个用例全通过**：上游 2 个（`smoke_test.dart`、`ios_download_client_test.dart`）+ 新增 `test/log_redact_test.dart` 9 个 |
+| 守卫断言 | `dart run tool/guard_selfcheck.dart` | exit 0，**69 条 PASS / 0 条 FAIL**（§5.1 原写「75 条」是按 `chk()` 调用点的估算，此处以实跑输出为准） |
+| 格式合规 | `dart format --output=none --set-exit-if-changed lib tool test` | **不合规，且不是本次改动造成的**：加固后 64 个文件里 54 个会被重排（exit 1），而**基线 59 个里已有 49 个**同样会被重排。另实测 `dart format` 在 Windows 上**保留 CRLF**（52→53 个 CRLF 是真实换行变化），所以这个数字与行尾无关，纯粹是 Dart 3.14 tall style 与上游历史写法不兼容 |
+
+**没有 `flutter analyze` 之前，§5.1 那套「解析通过 + 两个零依赖文件过 analyze」的结论，
+掩盖了 3 个必须靠全量编译才会暴露的真实缺陷**，见 §5.5。
+
+### 5.5 实跑暴露的自身缺陷（3 个，均已修）
+
+这 3 个缺陷都在**加固新增的代码**里，且都已随 `40bac12` 推到 `pa` 远端；下表「修法」是本轮工作区的改动，尚未提交。
+
+| # | 位置 | 症状 | 为什么之前没发现 | 修法 |
+|---|---|---|---|---|
+| 1 | [gopeed_boot.dart:409](../lib/core/gopeed/gopeed_boot.dart#L409) | `base64.encode(utf16.encode(script))` —— **`utf16` 在 `dart:convert` 里根本不存在**，`error - Undefined name 'utf16'`，整个 Windows 引擎启动路径编译不过 | 该文件 import Flutter，从没进过 `dart analyze` 的范围 | 新增 [_utf16LeBytes](../lib/core/gopeed/gopeed_boot.dart#L374) 按 `codeUnits` 手拼小端；已验证与 CPython `str.encode('utf-16-le')` **逐字节一致**（`abc` → `YQBiAGMA`），并经 PowerShell `[Text.Encoding]::Unicode.GetString` 解码回读一致；脚本是纯 ASCII（364 字符）不涉及代理对 |
+| 2 | [gopeed_client.dart:23](../lib/core/gopeed/gopeed_client.dart#L23) | `HttpHeaders.authorizationHeader` 来自 `dart:io`，而本文件**没有 import `dart:io`** → `error - Undefined name 'HttpHeaders'` | 同上 | 改用字面量 `'Authorization'`（HTTP 头名大小写不敏感），避免为一个常量把 `dart:io` 拖进这个可离线测试的文件 |
+| 3 | [app_logger.dart:104-117](../lib/utils/app_logger.dart#L104) | 两个脱敏正则写成内联 `(?i)`。**Dart 的 RegExp 是 ECMAScript 语法，不支持内联标志组**，构造时即抛 `FormatException: Invalid group`；而 [app_logger.dart:46](../lib/utils/app_logger.dart#L46) 在 `try` **之外**调用 `LogRedact.text` → 每条日志都抛异常，脱敏与落盘全废 | 分析器只把 `valid_regexps` 报成 **info**；纯静态「解析」阶段它是合法字符串，只有真正构造 `RegExp` 才炸 | 去掉 `(?i)`，改用 [RegExp 构造参数 `caseSensitive: false`](../lib/utils/app_logger.dart#L109)，并补 `test/log_redact_test.dart` 9 条行为断言把这类问题钉死在 `flutter test` 里 |
+
+**缺陷 3 的方法论教训**：`flutter analyze` 在本版本默认 `--fatal-infos` **on**（`flutter analyze --help` 实测两条 defaults to on），
+所以 info 级的 `valid_regexps` 也能让 CI 红；但只要有人图省事加上 `--no-fatal-infos`，这类「正则根本编译不过」的缺陷就会静默上线。
+因此正确姿势不是只靠 analyze，而是**把安全控制真正跑起来**——这正是 `test/log_redact_test.dart` 存在的理由。
+
+#### 勘误表（本轮自我更正）
+
+| 原说法 | 正确说法 | 出处 |
+|---|---|---|
+| 「62 个 dart 文件 `dart format` 全部通过」 | 全部通过的是**解析**；**格式**合规只有 10/64，且基线也只有 10/59 —— 上游本就不符合 Dart 3.14 tall style，不能据此在 CI 加 `--set-exit-if-changed` | `--set-exit-if-changed` 双口径实测（§5.4） |
+| 「75 条行为断言」 | 实跑 **69** 条 PASS（49 处 `chk()` 调用点在循环里展开） | `dart run tool/guard_selfcheck.dart` 输出计数 |
+| 「`LogRedact` 依赖 Flutter，完全没覆盖」 | 已由 `test/log_redact_test.dart` 覆盖并跑通 | `flutter test` 11 passed |
+| 「加固代码待全量编译验证」 | 已过**全量静态分析**：0 error，且相对基线 0 新增问题。**仍未做**：产物编译（缺 Android SDK / VS2022）、真机、CI 实跑 | 本节 §5.4 末行 |
+| 「`utf16` 是 Dart 3.x 移除的 API」 | 本文**不引用具体移除版本**：官方 breaking-changes 页面未能取到对应陈述。可确证的是本机 Dart 3.14.0 的 `dart-sdk/lib/convert/utf.dart` 只声明 `const Utf8Codec utf8`，无 `Utf16Codec`/`utf16`；`encoding.dart:73` 的名称表只有 `utf-8` 等，故 `Encoding.getByName('utf-16le')` 返回 null | SDK 源码 + 编译实测 |
+
 
 ---
 

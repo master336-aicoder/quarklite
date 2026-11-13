@@ -194,6 +194,19 @@ dart analyze                 # 配置见 analysis_options.yaml
 flutter test                 # test/ 目录
 ```
 
-本次加固交付**未执行**以上任何命令：本机既无 Flutter/Dart 工具链，
-Dart SDK 下载也未完成，且仓库代码全程未被运行。
-已执行的检查与其局限见 [hardening-changelog.md](hardening-changelog.md) §5。
+**状态更新（2026-11-13）**：上面这些命令现在都真跑过了 —— 本机装了
+Flutter 3.50.0 stable（Dart 3.14.0）在 `D:/tools/flutter`，SDK 包按官方
+`releases_windows.json` 的 sha256 校验后才解压。结果与逐项证据在
+[hardening-changelog.md](hardening-changelog.md) §5.4；**仍未执行**的是出包类命令
+（`flutter build apk` / Gopeed AAR / gopeed.exe），因为本机没有 Android SDK、
+没有 VS2022，且 Windows 构建需要的开发者模式未开。
+
+国内网络下需要的两个环境变量（否则会从 GCS 拉，实测慢约 60 倍）：
+
+```bash
+export FLUTTER_STORAGE_BASE_URL=https://storage.flutter-io.cn   # 引擎产物
+export PUB_HOSTED_URL=https://pub.flutter-io.cn                  # pub 包
+```
+
+另注：`flutter` 每次启动会在 SDK 自己的仓库里跑 `git fetch --tags`；本机 CRL 取不到
+导致它报 `code 128`，但**不影响命令成功**（与克隆本仓库要 `--ssl-no-revoke` 是同一个问题）。
