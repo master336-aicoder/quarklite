@@ -7,6 +7,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../theme/app_theme.dart';
 import '../../utils/app_logger.dart';
+import '../../utils/net_guard.dart';
 import '../../widgets/miuix_common.dart';
 
 /// 应用内风控验证页：WebView 加载迅雷验证页（图形/短信验证），
@@ -49,17 +50,30 @@ class _XunleiReviewPageState extends State<XunleiReviewPage> {
   }
 
   void _setup() {
+    if (NetGuard.parseHttp(widget.reviewUrl) == null) {
+      AppLogger.I.e('xunlei', '验证链接非法，拒绝加载: ${LogRedact.url(widget.reviewUrl)}');
+      _status = '验证链接非法，已拒绝加载';
+      return;
+    }
     final controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(NavigationDelegate(
-        onPageStarted: (url) {
-          // 页面脚本执行前注入 bridge（多次导航都会注入，容错）
-          _injectBridge();
+        onNavigationRequest: (request) {
+          // 只放行 http(s)：拦掉 file:// 与自定义 scheme 跳转
+          if (NetGuard.parseHttp(request.url) == null) {
+            AppLogger.I.w('xunlei', '拦截非 http(s) 导航: ${LogRedact.url(request.url)}');
+            return NavigationDecision.prevent;
+          }
+          // 迅雷验证页可能三跳到验证码服务商，硬拦会打断流程；
+          // 因此不阻止导航，只在此时不注入凭据 bridge（见 _injectBridge）
+          if (!NetGuard.isTrustedPage(request.url, NetScope.xunlei)) {
+            AppLogger.I.w('xunlei',
+                '验证页离开迅雷域，本次导航不注入凭据 bridge: ${LogRedact.url(request.url)}');
+          }
+          return NavigationDecision.navigate;
         },
-        onPageFinished: (url) {
-          // 兜底：页面加载完成后确认 bridge 生效，未生效再补一次注入
-          _injectBridge();
-        },
+        onPageStarted: _injectBridge,
+        onPageFinished: _injectBridge,
       ))
       ..loadRequest(Uri.parse(widget.reviewUrl));
     _controller = controller;
@@ -68,9 +82,13 @@ class _XunleiReviewPageState extends State<XunleiReviewPage> {
   }
 
   /// 注入原生通信桥：mock XLJSWebViewBridge + 写入初始 review 数据
-  void _injectBridge() {
+  ///
+  /// [url] 为当前导航目标；只有在迅雷域内才注入，
+  /// 避免把 creditkey/deviceid 交到任意被重定向到的第三方页面。
+  void _injectBridge(String url) {
     final c = _controller;
     if (c == null || _done) return;
+    if (!NetGuard.isTrustedPage(url, NetScope.xunlei)) return;
     _injectCount++;
     final data = jsonEncode({
       'creditkey': widget.creditKey,

@@ -7,6 +7,7 @@ import '../../state/download_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/app_logger.dart';
 import '../../utils/format.dart';
+import '../../utils/net_guard.dart';
 import '../../widgets/empty_view.dart';
 import '../../widgets/file_icon.dart';
 import '../../widgets/miuix_common.dart';
@@ -139,6 +140,7 @@ class _Netdisk123SharePageState extends State<Netdisk123SharePage> {
           url: url,
           fileName: f.name,
           cookie: '',
+          credentialScope: NetScope.pan123,
           path: base,
           maxConnections: app.netdisk123Connections,
           batchTotal: items.length,
@@ -164,6 +166,7 @@ class _Netdisk123SharePageState extends State<Netdisk123SharePage> {
           url: url,
           fileName: f.name,
           cookie: '',
+          credentialScope: NetScope.pan123,
           path: path,
           batchTotal: items.length,
           referer: 'https://www.123pan.com/',

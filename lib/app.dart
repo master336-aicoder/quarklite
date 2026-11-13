@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_miuix/miuix.dart';
 
+import 'core/credential_store.dart';
 import 'core/gopeed/gopeed_boot.dart';
 import 'core/notify/download_notifier.dart';
 import 'core/update_checker.dart';
@@ -52,8 +53,10 @@ class _QuarkLiteAppState extends State<QuarkLiteApp> {
       _bootError = e.toString();
       AppLogger.I.e('app', 'AppState 初始化失败: $e');
     }
-    unawaited(XunleiState.I.init());
-    unawaited(Netdisk123State.I.init());
+    // 迅雷/123 登录态恢复（非阻塞），完成后清理旧版本遗留在
+    // SharedPreferences 中的明文凭据副本——改了写入逻辑不会让已落盘的
+    // 明文自己消失，必须升级后显式清一次
+    unawaited(_restoreSecondaryAccountsAndPurge());
     unawaited(_bootEngine());
     DownloadManager.I.startPolling();
     if (mounted) {
@@ -61,6 +64,30 @@ class _QuarkLiteAppState extends State<QuarkLiteApp> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) unawaited(UpdateChecker.checkAndPrompt(context));
       });
+    }
+  }
+
+  Future<void> _restoreSecondaryAccountsAndPurge() async {
+    try {
+      await XunleiState.I.init();
+    } catch (e) {
+      AppLogger.I.e('app', '迅雷登录态恢复失败: $e');
+    }
+    try {
+      await Netdisk123State.I.init();
+    } catch (e) {
+      AppLogger.I.e('app', '123 网盘登录态恢复失败: $e');
+    }
+    // 恢复完成后再清理，避免与旧单账号键的迁移读取抢跑
+    try {
+      await CredentialStore.I.purgeLegacyPlaintext([
+        ...AppState.legacyPlaintextKeys,
+        ...XunleiState.legacyPlaintextKeys,
+        ...Netdisk123State.legacyPlaintextKeys,
+      ]);
+      await Netdisk123State.I.purgeCredentialDuplicates();
+    } catch (e) {
+      AppLogger.I.e('app', '清理历史明文凭据失败: $e');
     }
   }
 

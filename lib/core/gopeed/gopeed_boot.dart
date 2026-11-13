@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -19,6 +20,8 @@ class GopeedEngine {
   static Process? _winProcess;
   static bool _winServerReady = false;
   static String _winDiag = '';
+  /// 本次会话实际使用的 gopeed.exe 所在目录，供残留进程定向清理比对
+  static String? _winExeDir;
 
   /// 进行中的启动流程（并发调用共享同一次启动，避免互相杀掉对方刚拉起的引擎进程）
   static Future<void>? _startInFlight;
@@ -31,6 +34,22 @@ class GopeedEngine {
 
   /// 最近一次引擎启动失败的详细原因（供界面展示）
   static String? lastError;
+
+  /// 本次会话的 REST API 随机 token。
+  ///
+  /// 加固前固定为空串，等于本机 127.0.0.1 上的下载接口无任何鉴权：
+  /// 同机任意进程可下发任意 URL/路径的下载任务、读写引擎配置，
+  /// 并可通过任务详情读到随任务提交的网盘 Cookie。
+  /// token 每次进程生命周期内生成一次，引擎重启沿用（客户端同步重建）。
+  static String? _apiToken;
+
+  static String get _token {
+    final t = _apiToken;
+    if (t != null && t.isNotEmpty) return t;
+    final r = math.Random.secure();
+    final bytes = List<int>.generate(32, (_) => r.nextInt(256));
+    return _apiToken = base64Url.encode(bytes).replaceAll('=', '');
+  }
 
   static DownloadClient get client {
     final c = _client;
@@ -118,7 +137,7 @@ class GopeedEngine {
       'storage': 'bolt',
       'storageDir': storageDir,
       'refreshInterval': 350,
-      'apiToken': '',
+      'apiToken': _token,
     };
     String lastError_ = '';
     for (var attempt = 0; attempt < 3; attempt++) {
@@ -135,7 +154,7 @@ class GopeedEngine {
         if (port == null || port <= 0) {
           throw Exception('引擎返回无效端口');
         }
-        _client = GopeedClient('http://127.0.0.1:$port');
+        _client = GopeedClient('http://127.0.0.1:$port', apiToken: _token);
         _started = true;
         return;
       } catch (e) {
@@ -169,12 +188,13 @@ class GopeedEngine {
     }
     final docs = await getApplicationDocumentsDirectory();
     final storageDir = '${docs.path}/gopeed';
-    final exe = _findGopeedExe();
+    final exe = _findGopeedExe(docs.path);
     if (exe == null) {
       lastError = '未找到 gopeed.exe，请确认程序目录完整';
       AppLogger.I.e('engine', 'Windows 启动失败: $lastError');
       throw Exception(lastError!);
     }
+    _winExeDir = File(exe).parent.path;
     AppLogger.I.i('engine', 'Windows 引擎启动 exe=$exe storage=$storageDir retry=$retry');
     _winDiag = '';
     String lastError_ = '';
@@ -183,15 +203,11 @@ class GopeedEngine {
       Process? process;
       try {
         await _stopWindowsProcess();
-        // 清掉所有残留 gopeed 实例：残留进程持有 bolt 数据库文件锁，
-        // 会让新引擎卡在初始化阶段（打印 banner 后无输出）
-        await _killAllGopeed();
-        await Future.delayed(const Duration(milliseconds: 200));
         // 端口 0 表示随机分配，解析 stdout 中的监听地址
         process = await Process.start(exe, [
           '-A', '127.0.0.1',
           '-P', '0',
-          '-T', '',
+          '-T', _token,
           '-d', storageDir,
         ]);
         _winProcess = process;
@@ -211,7 +227,7 @@ class GopeedEngine {
         if (port == null || port <= 0) {
           throw Exception('引擎未正常启动: $_winDiag');
         }
-        _client = GopeedClient('http://127.0.0.1:$port');
+        _client = GopeedClient('http://127.0.0.1:$port', apiToken: _token);
         _started = true;
         _winServerReady = true;
         _lastStartTime = DateTime.now();
@@ -277,16 +293,16 @@ class GopeedEngine {
     throw Exception(lastError!);
   }
 
-  /// 查找 gopeed.exe：优先程序目录（打包产物目录），其次应用文档目录
-  static String? _findGopeedExe() {
+  /// 查找 gopeed.exe：仅接受受控目录（主程序目录、应用私有文档目录）下的绝对路径。
+  ///
+  /// 加固前还把裸名 `gopeed.exe` 作为候选（按当前工作目录与 PATH 解析），
+  /// 等于允许任意位置的替身二进制被当作下载引擎拉起；该候选已移除。
+  static String? _findGopeedExe(String docsPath) {
     final candidates = <String>[];
     try {
-      final exeDir = File(Platform.resolvedExecutable).parent.path;
-      candidates.add('$exeDir/gopeed.exe');
+      candidates.add('${File(Platform.resolvedExecutable).parent.path}/gopeed.exe');
     } catch (_) {}
-    try {
-      candidates.add('gopeed.exe');
-    } catch (_) {}
+    candidates.add('$docsPath/gopeed.exe');
     for (final c in candidates) {
       if (File(c).existsSync()) return c;
     }
@@ -348,16 +364,61 @@ class GopeedEngine {
     return '$head …[中间省略 ${s.length - limit} 字符]… $tail';
   }
 
-  /// 杀掉所有 gopeed.exe 进程（含其他实例残留，释放数据库文件锁）
+  /// 杀掉残留的引擎进程，释放 bolt 数据库文件锁。
+  ///
+  /// 只处理可执行文件位于本次启动所用 exe 同目录的实例——加固前用
+  /// `taskkill /IM gopeed.exe /F` 按映像名强杀，会连带终止用户
+  /// 自己启动的同名 Gopeed 客户端。
+  /// 脚本走 `-EncodedCommand`（UTF-16LE，Windows 小端）、目录走环境变量，
+  /// 两者都不参与命令行字符串拼接，避免路径注入。
   static Future<void> _killAllGopeed() async {
+    final exeDirRaw = _winExeDir;
+    if (exeDirRaw == null) {
+      AppLogger.I.w('engine', '未知引擎 exe 目录，跳过残留进程清理（不做全局按名强杀）');
+      return;
+    }
+    const script = r'''
+$ErrorActionPreference = "SilentlyContinue"
+$dir = $env:QUARKLITE_GOPEED_DIR
+$hit = 0
+Get-CimInstance Win32_Process -Filter "Name='gopeed.exe'" | ForEach-Object {
+  if ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase)) {
+    Stop-Process -Id $_.ProcessId -Force
+    $hit = $hit + 1
+  }
+}
+Write-Output "killed=$hit"
+''';
+    final encoded = base64.encode(utf16.encode(script));
     try {
-      final r = await Process.run('taskkill', ['/IM', 'gopeed.exe', '/F']);
-      if (r.exitCode == 0) {
-        AppLogger.I.w('engine',
-            'taskkill 清除了残留 gopeed 进程: ${r.stdout.toString().trim()}');
+      final r = await Process.run(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
+        environment: {'QUARKLITE_GOPEED_DIR': exeDirRaw},
+      );
+      final killed = int.tryParse(
+              RegExp(r'killed=(\d+)').firstMatch(r.stdout.toString())?.group(1) ??
+                  '') ??
+          0;
+      if (killed > 0) {
+        AppLogger.I.w('engine', '清理了 $killed 个残留引擎进程 (dir=$exeDirRaw)');
       }
-    } catch (_) {
-      // 无残留实例时 taskkill 会报错，忽略
+      if (r.exitCode != 0) {
+        AppLogger.I.w('engine',
+            '定向清理返回非零码 ${r.exitCode}: ${r.stderr.toString().trim()}');
+      }
+    } catch (e) {
+      // PowerShell 不可用（组策略禁用等）时才退回按映像名强杀，并显式告警
+      AppLogger.I.w('engine', 'PowerShell 定向清理不可用，退回按映像名强杀: $e');
+      try {
+        final r = await Process.run('taskkill', ['/IM', 'gopeed.exe', '/F']);
+        if (r.exitCode == 0) {
+          AppLogger.I.w('engine',
+              'taskkill 清除了残留 gopeed 进程: ${r.stdout.toString().trim()}');
+        }
+      } catch (_) {
+        // 无残留实例时 taskkill 会报错，忽略
+      }
     }
   }
 

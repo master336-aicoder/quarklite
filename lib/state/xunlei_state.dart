@@ -1,10 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/xunlei_client.dart';
+import '../core/credential_store.dart';
 import '../utils/app_logger.dart';
 
 /// 迅雷云盘登录态管理（token 持久化 + refresh 续期）
@@ -14,13 +13,15 @@ class XunleiState extends ChangeNotifier {
   static const _kUser = 'xunlei_user_id';
   static const _kUsername = 'xunlei_username';
 
+  /// 历史版本曾在 SharedPreferences 里留下的明文副本键，升级时清理一次
+  static const legacyPlaintextKeys = [
+    _kAccess, _kRefresh, _kUser, _kUsername,
+  ];
+
   static XunleiState? _instance;
   static XunleiState get I => _instance ??= XunleiState._();
 
   final XunleiClient client = XunleiClient();
-  final _secure = const FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
-  );
 
   String? username; // 登录账号（手机号/邮箱），仅本机展示
   bool _ready = false;
@@ -125,14 +126,9 @@ class XunleiState extends ChangeNotifier {
     _refreshTimer?.cancel();
     _refreshTimer = null;
     for (final k in [_kAccess, _kRefresh, _kUser, _kUsername]) {
-      try {
-        await _secure.delete(key: k);
-      } catch (_) {}
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.remove(k);
-      } catch (_) {}
+      await CredentialStore.I.delete(k);
     }
+    await CredentialStore.I.purgeLegacyPlaintext(legacyPlaintextKeys);
     AppLogger.I.i('xunlei', '已退出登录');
     notifyListeners();
   }
@@ -170,27 +166,11 @@ class XunleiState extends ChangeNotifier {
     if (username != null) await _write(_kUsername, username!);
   }
 
-  Future<String> _read(String key) async {
-    try {
-      final v = await _secure.read(key: key);
-      if (v != null && v.isNotEmpty) return v;
-    } catch (_) {}
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      return prefs.getString(key) ?? '';
-    } catch (_) {}
-    return '';
-  }
+  Future<String> _read(String key) => CredentialStore.I.read(key);
 
   Future<void> _write(String key, String value) async {
     if (value.isEmpty) return;
-    try {
-      await _secure.write(key: key, value: value);
-    } catch (_) {}
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(key, value);
-    } catch (_) {}
+    await CredentialStore.I.write(key, value);
   }
 
   @override

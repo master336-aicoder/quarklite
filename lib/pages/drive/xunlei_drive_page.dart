@@ -9,6 +9,8 @@ import '../../state/xunlei_state.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/app_logger.dart';
 import '../../utils/format.dart';
+import '../../utils/net_guard.dart';
+import '../../utils/path_guard.dart';
 import '../../widgets/empty_view.dart';
 import '../../widgets/file_icon.dart';
 import '../../widgets/file_list_anim.dart';
@@ -196,11 +198,12 @@ class _XunleiDrivePageState extends State<XunleiDrivePage> {
         if (f == null) continue;
         final url = f.downloadUrlFor();
         if (url.isEmpty) continue;
-        final path = rel.isEmpty ? base : '$base/$rel';
+        final path = PathGuard.joinUnder(base, rel);
         final err = await DownloadService.addDirectUrl(
           url: url,
           fileName: f.name,
           cookie: '',
+          credentialScope: NetScope.xunlei,
           path: path,
           maxConnections: app.xunleiConnections,
           batchTotal: items.length,
@@ -445,6 +448,7 @@ class _XunleiDrivePageState extends State<XunleiDrivePage> {
         url: url,
         fileName: detail.name,
         cookie: '',
+        credentialScope: NetScope.xunlei,
         path: base,
         maxConnections: app.xunleiConnections,
         referer: 'https://pan.xunlei.com/',

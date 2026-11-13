@@ -8,6 +8,7 @@ import '../../state/download_manager.dart';
 import '../../state/download_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/format.dart';
+import '../../utils/net_guard.dart';
 import '../../widgets/empty_view.dart';
 import '../../widgets/file_icon.dart';
 import '../../widgets/file_list_anim.dart';
@@ -166,6 +167,7 @@ class _ShareFilesPageState extends State<ShareFilesPage> {
           url: info.url,
           fileName: info.fileName,
           cookie: cookie,
+          credentialScope: NetScope.quark,
           batchTotal: total,
         );
         if (err == null) added++;
@@ -422,6 +424,7 @@ class _ShareFilesPageState extends State<ShareFilesPage> {
         url: info.url,
         fileName: info.fileName.isNotEmpty ? info.fileName : file.fileName,
         cookie: cookie,
+        credentialScope: NetScope.quark,
       );
       if (err != null) throw Exception(err);
       _toast('已加入下载队列');

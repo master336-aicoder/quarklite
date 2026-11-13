@@ -11,6 +11,8 @@ import 'netdisk123_diag_page.dart';
 import 'netdisk123_pay_page.dart';
 import '../../utils/app_logger.dart';
 import '../../utils/format.dart';
+import '../../utils/net_guard.dart';
+import '../../utils/path_guard.dart';
 import '../../widgets/empty_view.dart';
 import '../../widgets/file_icon.dart';
 import '../../widgets/file_list_anim.dart';
@@ -308,11 +310,12 @@ class _Netdisk123DrivePageState extends State<Netdisk123DrivePage> {
         try {
           final url = await _client.getDownloadUrl(f);
           if (url.isEmpty) continue;
-          final path = rel.isEmpty ? base : '$base/$rel';
+          final path = PathGuard.joinUnder(base, rel);
           final err = await DownloadService.addDirectUrl(
             url: url,
             fileName: f.name,
             cookie: '',
+            credentialScope: NetScope.pan123,
             path: path,
             maxConnections: app.netdisk123Connections,
             batchTotal: items.length,
@@ -573,6 +576,7 @@ class _Netdisk123DrivePageState extends State<Netdisk123DrivePage> {
         url: url,
         fileName: file.name,
         cookie: '',
+        credentialScope: NetScope.pan123,
         path: base,
         maxConnections: app.netdisk123Connections,
         referer: 'https://www.123pan.com/',

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 
+import '../../utils/path_guard.dart';
 import '../../utils/types.dart';
 import 'download_client.dart';
 import 'gopeed_models.dart';
@@ -9,11 +10,15 @@ import 'gopeed_models.dart';
 class GopeedClient implements DownloadClient {
   final Dio _dio;
 
-  GopeedClient(String baseUrl)
+  /// [apiToken] 为引擎本次会话的随机 REST token；空串表示引擎未启用鉴权。
+  GopeedClient(String baseUrl, {String apiToken = ''})
       : _dio = Dio(BaseOptions(
           baseUrl: '$baseUrl/api/v1',
           connectTimeout: const Duration(seconds: 5),
           receiveTimeout: const Duration(seconds: 10),
+          headers: {
+            if (apiToken.isNotEmpty) HttpHeaders.authorizationHeader: 'Bearer $apiToken',
+          },
         ));
 
   dynamic _check(Response<dynamic> resp) {
@@ -29,6 +34,9 @@ class GopeedClient implements DownloadClient {
   }
 
   /// 创建任务，返回任务 id
+  ///
+  /// name/path 来自网盘接口或分享内容，属外部输入，这里统一做越界防护：
+  /// 路径含 `..` 直接拒绝，任务名清洗掉分隔符与保留字符。
   @override
   Future<String> create({
     required String url,
@@ -37,6 +45,9 @@ class GopeedClient implements DownloadClient {
     Map<String, String> headers = const {},
     int connections = 16,
   }) async {
+    final badPath = PathGuard.traversalRejection(path);
+    if (badPath != null) throw Exception('下载路径非法: $badPath');
+    final safeName = (name == null || name.isEmpty) ? '' : PathGuard.safeName(name);
     final resp = await _dio.post('/tasks', data: {
       'req': {
         'url': url,
@@ -48,7 +59,7 @@ class GopeedClient implements DownloadClient {
           },
       },
       'opts': {
-        'name': name ?? '',
+        'name': safeName,
         'path': path,
         'selectFiles': <int>[],
         'extra': {'connections': connections},

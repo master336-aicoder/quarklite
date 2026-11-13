@@ -2,6 +2,15 @@ name: Diag Gopeed Windows
 
 on:
   workflow_dispatch:
+    inputs:
+      gopeed_version:
+        description: 'Gopeed 版本（与 vars.GOPEED_VERSION 保持一致）'
+        default: 'v1.9.3'
+        required: false
+      gopeed_sha256:
+        description: 'gopeed-web-<版本>-windows-amd64.zip 的 SHA-256（必填才能验证完整性）'
+        default: ''
+        required: false
   push:
     branches: [main]
     paths: ['.github/workflows/diag-gopeed.yml']
@@ -9,11 +18,32 @@ on:
 jobs:
   diag:
     runs-on: windows-latest
+    # 加固：显式收敛 GITHUB_TOKEN 权限（本 job 不读写仓库内容）
+    permissions:
+      contents: read
     steps:
       - name: Download gopeed-web
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://github.com/GopeedLab/gopeed/releases/download/v1.9.3/gopeed-web-v1.9.3-windows-amd64.zip" -OutFile gopeed.zip
+          $ver = '${{ github.event.inputs.gopeed_version }}'
+          if ([string]::IsNullOrWhiteSpace($ver)) { $ver = 'v1.9.3' }
+          $want = '${{ github.event.inputs.gopeed_sha256 }}'
+          $url = "https://github.com/GopeedLab/gopeed/releases/download/$ver/gopeed-web-$ver-windows-amd64.zip"
+          Write-Host "downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile gopeed.zip
+          # 加固：下载即执行前校验 SHA-256。未提供期望值时显式告警并继续
+          # （诊断流程需要能随时跑），正式发版依赖的构建必须提供。
+          $actual = (Get-FileHash gopeed.zip -Algorithm SHA256).Hash
+          Write-Host "zip SHA-256 = $actual"
+          if ([string]::IsNullOrWhiteSpace($want)) {
+            Write-Warning "未提供 gopeed_sha256，本次下载未做完整性校验"
+          } else {
+            if ($actual -ne $want.Replace('sha256:','').Trim()) {
+              Write-Error "SHA-256 不匹配：期望 $want 实际 $actual —— 已中止"
+              exit 1
+            }
+            Write-Host "SHA-256 校验通过"
+          }
           Expand-Archive gopeed.zip -DestinationPath gopeed
           $exe = Get-ChildItem -Path gopeed -Recurse -Filter "gopeed*.exe" | Select-Object -First 1
           New-Item -ItemType Directory -Force -Path "$env:TEMP\gopeed-storage" | Out-Null
@@ -23,6 +53,8 @@ jobs:
       - name: Start engine like quarklite does
         shell: pwsh
         run: |
+          # 注意：应用侧已改为随机 -T token（见 lib/core/gopeed/gopeed_boot.dart），
+          # 本步骤刻意保留空 token，用于对比"无鉴权 vs 有鉴权"下的启动行为差异。
           $out = Join-Path $env:TEMP 'gopeed-out.log'
           $err = Join-Path $env:TEMP 'gopeed-err.log'
           $p = Start-Process -FilePath $env:GOPEED_EXE `

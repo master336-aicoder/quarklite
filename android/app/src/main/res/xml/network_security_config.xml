@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  网络安全配置（加固引入，替代原先的 android:usesCleartextTraffic="true"）。
+
+  base-config：release 一律禁止明文 HTTP，且信任锚只保留系统 CA——
+  用户自行安装的 CA（抓包工具、企业根证书）不再被信任，
+  避免中间人轻易读到随请求携带的网盘会话凭据。
+  没有 domain-config 时，所有连接都落到 base-config（官方语义）。
+
+  debug-overrides：仅在应用可调试（debug/profile 构建）时额外信任用户 CA，
+  保留本地抓包排查接口问题的能力，不影响发布包的安全性。
+
+  注意生效范围：本配置自 API 24 起生效，API 23 及以下要靠 manifest 里的
+  android:usesCleartextTraffic="false"；反过来，targetSdk 38+ 时该属性被忽略，
+  长期机制是这个 NSC 文件。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>

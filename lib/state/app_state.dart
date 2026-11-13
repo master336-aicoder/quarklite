@@ -4,18 +4,18 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/quark_client.dart';
 import '../api/quark_models.dart';
+import '../core/credential_store.dart';
 import '../core/gopeed/gopeed_boot.dart';
+import '../utils/app_logger.dart';
 
 class AppState extends ChangeNotifier {
   static const _sysChannel = MethodChannel('quarklite.com/system');
   static const _kCookie = 'quark_cookie';
-  static const _kCookieBackup = 'quark_cookie_backup';
   static const _kUserCache = 'quark_user_cache';
   static const _kDownloadDir = 'download_dir';
   static const _kConnections = 'connections';
@@ -27,6 +27,9 @@ class AppState extends ChangeNotifier {
   static const _kThemeMode = 'app_theme_mode';
   static const _kUploadParallelism = 'upload_parallelism';
 
+  /// 历史版本写入 SharedPreferences 的明文凭据键，升级时清理一次
+  static const legacyPlaintextKeys = ['quark_cookie_backup'];
+
   /// 应用外观模式：system（跟随系统）/ light / dark
   String themeMode = 'system';
 
@@ -36,9 +39,6 @@ class AppState extends ChangeNotifier {
   AppState._();
 
   final QuarkClient quark = QuarkClient();
-  final _secure = const FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
-  );
 
   QuarkUserInfo? user;
   String? loginError;
@@ -82,42 +82,33 @@ class AppState extends ChangeNotifier {
     await refreshUser();
   }
 
-  /// 读取持久化 cookie：优先安全存储，读取失败时回退到普通存储
+  /// 读取持久化 cookie：只读系统安全存储。
+  ///
+  /// 加固前安全存储读失败会回退到 SharedPreferences 的明文副本，
+  /// 等于让 Keystore 加密失效；现在不再降级，读不到就是未登录，
+  /// 由界面提示重新登录（个别 Keystore 异常设备会掉登录，属有意取舍）。
   Future<String?> _loadCookie() async {
-    try {
-      final cookie = await _secure.read(key: _kCookie);
-      if (cookie != null && cookie.isNotEmpty) return cookie;
-    } catch (_) {
-      // 部分设备 Keystore 异常导致安全存储不可读，走兜底存储
+    final cookie = await CredentialStore.I.read(_kCookie);
+    if (!CredentialStore.I.secureAvailable) {
+      AppLogger.I.w('auth', '系统安全存储不可用，夸克登录态无法恢复');
     }
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      return prefs.getString(_kCookieBackup);
-    } catch (_) {
-      return null;
-    }
+    return cookie.isEmpty ? null : cookie;
   }
 
-  /// 双写持久化：安全存储 + 普通存储兜底
+  /// 持久化 cookie：仅写安全存储，失败显式记日志而非静默双写明文
   Future<void> _saveCookie() async {
     final cookie = quark.cookie;
     if (cookie.isEmpty) return;
-    try {
-      await _secure.write(key: _kCookie, value: cookie);
-    } catch (_) {}
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_kCookieBackup, cookie);
-    } catch (_) {}
+    if (!await CredentialStore.I.write(_kCookie, cookie)) {
+      AppLogger.I.e('auth', '夸克 cookie 未能持久化：系统安全存储不可用');
+    }
   }
 
   Future<void> _clearCookie() async {
-    try {
-      await _secure.delete(key: _kCookie);
-    } catch (_) {}
+    await CredentialStore.I.delete(_kCookie);
+    await CredentialStore.I.purgeLegacyPlaintext(legacyPlaintextKeys);
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_kCookieBackup);
       await prefs.remove(_kUserCache);
     } catch (_) {}
   }

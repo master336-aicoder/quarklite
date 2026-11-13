@@ -3,8 +3,9 @@ import 'dart:io';
 
 import 'package:background_downloader/background_downloader.dart';
 
-import 'download_client.dart';
 import '../../utils/app_logger.dart';
+import '../../utils/path_guard.dart';
+import 'download_client.dart';
 import 'gopeed_models.dart';
 
 /// iOS 原生 URLSession 后台下载客户端。
@@ -102,7 +103,11 @@ class IosBackgroundDownloadClient implements DownloadClient {
     int connections = 16,
   }) async {
     await start();
-    final fileName = (name == null || name.isEmpty) ? 'download' : name;
+    // name/path 来自网盘接口，属外部输入：清洗文件名并拒绝任何上级引用
+    final badPath = PathGuard.traversalRejection(path);
+    if (badPath != null) throw Exception('下载路径非法: $badPath');
+    final fileName =
+        (name == null || name.isEmpty) ? 'download' : PathGuard.safeName(name);
     final targetPath = _joinPath(path, fileName);
     final (baseDirectory, directory, resolvedName) =
         await Task.split(filePath: targetPath);

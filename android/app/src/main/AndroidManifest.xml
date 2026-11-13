@@ -10,16 +10,33 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
 
+    <!--
+      加固相关的四个开关（详见 docs/security-design.md）：
+
+      allowBackup=false      —— 默认值是 true；关掉后云备份、近设备转移与 adb backup
+                                都不再带走应用私有数据（凭据曾以可读 XML 落在这里）。
+      dataExtractionRules    —— Android 12（API 31）起的备份/转移规则；Android 11 及以下
+                                由 allowBackup 兜住。部分厂商 ROM 上 D2D 文件迁移无法关闭。
+      networkSecurityConfig  —— API 24 起生效；release 禁止明文 HTTP 且只信任系统 CA。
+      usesCleartextTraffic   —— targetSdk 28+ 默认已是 false，但该属性对 API 23 及以下
+                                仍是唯一手段（官方要求 NSC 之外再显式声明），
+                                且 targetSdk 38+ 后会被忽略，长期机制是上面的 NSC。
+      requestLegacyExternalStorage —— 仅在 target Android 10 时有效；本应用 targetSdk 取自
+                                flutter.targetSdkVersion（远高于 30），该标志实际被系统忽略，
+                                全部文件访问能力来自 MANAGE_EXTERNAL_STORAGE。保留以免误判。
+    -->
     <application
         android:label="Quarklite"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:requestLegacyExternalStorage="true"
-        android:usesCleartextTraffic="true">
+        android:allowBackup="false"
+        android:usesCleartextTraffic="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:networkSecurityConfig="@xml/network_security_config">
         <activity
             android:name=".MainActivity"
             android:exported="true"

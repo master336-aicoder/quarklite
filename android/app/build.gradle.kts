@@ -48,6 +48,21 @@ android {
             signingConfig = if (keystorePropertiesFile.exists()) {
                 signingConfigs.getByName("release")
             } else {
+                // 加固：缺少 key.properties 时原本静默退回 debug 签名，
+                // 会让误打的发布包与正式包签名不同（用户无法覆盖安装）却毫无提示。
+                // 现在显式告警，并支持 -Pquarklite.requireReleaseSigning 直接失败
+                // （CI 用它兜底，另在构建后校验 APK 签名者）。
+                val strict = (findProperty("quarklite.requireReleaseSigning")?.toString() == "true")
+                if (strict) {
+                    throw GradleException(
+                        "release 构建缺少 android/key.properties，拒绝以 debug 签名出包。" +
+                            "本地自测请改用 --debug，或按 docs/operations.md 配置签名材料。"
+                    )
+                }
+                logger.warn(
+                    "Quarklite: android/key.properties 不存在，release 将使用 DEBUG 签名——" +
+                        "该包不可对外发布（与正式包签名不同，用户无法覆盖安装）。"
+                )
                 signingConfigs.getByName("debug")
             }
         }

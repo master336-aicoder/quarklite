@@ -1,10 +1,9 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/netdisk123_client.dart';
+import '../core/credential_store.dart';
 import '../utils/app_logger.dart';
 
 /// 单个 123 网盘账号
@@ -47,13 +46,16 @@ class Netdisk123State extends ChangeNotifier {
   static const _kPassword = 'netdisk123_password';
   static const _kUsername = 'netdisk123_username';
 
+  /// 历史版本曾在 SharedPreferences 里留下的明文副本键（含明文登录密码），
+  /// 升级时清理一次；这些键此后只存在于 Keystore 后端。
+  static const legacyPlaintextKeys = [
+    _kAccounts, _kActiveId, _kToken, _kPassword, _kUsername,
+  ];
+
   static Netdisk123State? _instance;
   static Netdisk123State get I => _instance ??= Netdisk123State._();
 
   final Netdisk123Client client = Netdisk123Client();
-  final _secure = const FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
-  );
 
   List<Netdisk123Account> accounts = [];
   String? _activeId;
@@ -321,14 +323,9 @@ class Netdisk123State extends ChangeNotifier {
     accounts = [];
     _activeId = null;
     for (final k in [_kAccounts, _kActiveId, _kToken, _kPassword, _kUsername]) {
-      try {
-        await _secure.delete(key: k);
-      } catch (_) {}
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.remove(k);
-      } catch (_) {}
+      await CredentialStore.I.delete(k);
     }
+    await CredentialStore.I.purgeLegacyPlaintext(legacyPlaintextKeys);
     AppLogger.I.i('netdisk123', '已退出全部登录');
     notifyListeners();
   }
@@ -362,35 +359,24 @@ class Netdisk123State extends ChangeNotifier {
     if (_activeId != null && _activeId!.isNotEmpty) {
       await _write(_kActiveId, _activeId!);
     }
-    // 同步当前活跃账号的 token/password 到旧键（兼容旧版本回退）
-    final a = active;
-    if (a != null) {
-      await _write(_kToken, a.token);
-      await _write(_kUsername, a.username);
-      if (a.password.isNotEmpty) await _write(_kPassword, a.password);
-    }
+    // 不再将活跃账号的 token/password 回写到旧单账号键：
+    // 旧键仅用于升级时读取迁移，继续写只会让同一份明文密码多存三份副本。
+    // 迁移完成后由 purgeCredentialDuplicates 清掉残留。
   }
 
-  Future<String> _read(String key) async {
-    try {
-      final v = await _secure.read(key: key);
-      if (v != null && v.isNotEmpty) return v;
-    } catch (_) {}
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      return prefs.getString(key) ?? '';
-    } catch (_) {}
-    return '';
+  /// 迁移完成后删除旧单账号键，减少密码副本数量
+  Future<void> purgeCredentialDuplicates() async {
+    for (final k in [_kToken, _kPassword, _kUsername]) {
+      final v = await _read(k);
+      if (v.isNotEmpty) await CredentialStore.I.delete(k);
+    }
+    await CredentialStore.I.purgeLegacyPlaintext(legacyPlaintextKeys);
   }
+
+  Future<String> _read(String key) => CredentialStore.I.read(key);
 
   Future<void> _write(String key, String value) async {
     if (value.isEmpty) return;
-    try {
-      await _secure.write(key: key, value: value);
-    } catch (_) {}
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(key, value);
-    } catch (_) {}
+    await CredentialStore.I.write(key, value);
   }
 }

@@ -12,6 +12,10 @@ concurrency:
 jobs:
   build-android:
     runs-on: ubuntu-latest
+    # 加固：显式收敛本 job 的 GITHUB_TOKEN 权限（原先沿用仓库默认宽权限）。
+    # 构建 APK 不需要写仓库内容，publish-release 才单独申请 contents: write。
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,48 +45,123 @@ jobs:
         with:
           channel: stable
 
-      - name: Cache gopeed source
-        uses: actions/cache@v4
-        with:
-          path: /tmp/gopeed-src
-          key: gopeed-${{ vars.GOPEED_VERSION || 'v1.9.3' }}
-          restore-keys: |
-            gopeed-
-
+      # 加固：移除 gopeed 源码的 actions/cache 复用。
+      # 原 restore-keys: gopeed- 会跨版本命中旧缓存，且缓存目录内容不参与校验，
+      # 等于让"构建用的是哪一版引擎源码"无法确认。浅克隆一个 tag 体量很小，
+      # 每次重新拉取换取可追溯性。
       - name: Build libgopeed.aar
         run: bash scripts/build_libgopeed.sh
         env:
           GOPEED_VERSION: ${{ vars.GOPEED_VERSION || 'v1.9.3' }}
+          # 未设置时脚本会告警并继续；正式发版请在仓库 Variables 里固定该 commit
+          GOPEED_COMMIT: ${{ vars.GOPEED_COMMIT }}
+          GOMOBILE_VERSION: ${{ vars.GOMOBILE_VERSION }}
 
-      - name: Cache keystore
-        uses: actions/cache@v4
-        with:
-          path: android/app/upload-keystore.jks
-          key: keystore-${{ github.repository }}
-
-      - name: Keystore + key.properties
+      # 加固：签名材料全部来自仓库 Secrets，不再把口令写死在公开 workflow 里。
+      # 原方案（口令 quarklite2026 明文 + keytool 现场生成 + actions/cache 保活）
+      # 意味着任何能读到该仓库的人都能产出同签名 APK，签名不再具备来源辨识度。
+      - name: Assert release signing secrets present
         shell: bash
+        env:
+          KS_B64: ${{ secrets.QUARKLITE_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.QUARKLITE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.QUARKLITE_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.QUARKLITE_KEY_PASSWORD }}
+        run: |
+          missing=0
+          for pair in "QUARKLITE_KEYSTORE_BASE64=$KS_B64" \
+                      "QUARKLITE_KEYSTORE_PASSWORD=$KS_PASS" \
+                      "QUARKLITE_KEY_ALIAS=$KEY_ALIAS" \
+                      "QUARKLITE_KEY_PASSWORD=$KEY_PASS"; do
+            if [ -z "${pair#*=}" ]; then
+              echo "::error::缺少 Secret：${pair%%=*}（见 docs/operations.md 发布签名一节）"
+              missing=1
+            fi
+          done
+          [ "$missing" = "0" ] || exit 1
+
+      - name: Restore keystore from secrets
+        shell: bash
+        env:
+          KS_B64: ${{ secrets.QUARKLITE_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.QUARKLITE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.QUARKLITE_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.QUARKLITE_KEY_PASSWORD }}
         run: |
           mkdir -p android/app
-          if [ ! -f android/app/upload-keystore.jks ]; then
-            keytool -genkeypair -v \
-              -keystore android/app/upload-keystore.jks \
-              -alias quarklite -keyalg RSA -keysize 2048 -validity 10000 \
-              -storepass quarklite2026 -keypass quarklite2026 \
-              -dname "CN=QuarkLite, OU=Dev, O=QuarkLite, L=Beijing, S=Beijing, C=CN"
-          fi
-          # 每次都写，避免 keystore 命中缓存时退回 debug 签名（签名不一致会导致无法覆盖安装）
+          printf '%s' "$KS_B64" | base64 -d > android/app/upload-keystore.jks
+          # 口令只写进 key.properties（该文件已在 .gitignore 中，且不进任何产物）
           printf '%s\n' \
             "storeFile=upload-keystore.jks" \
-            "storePassword=quarklite2026" \
-            "keyAlias=quarklite" \
-            "keyPassword=quarklite2026" > android/key.properties
+            "storePassword=$KS_PASS" \
+            "keyAlias=$KEY_ALIAS" \
+            "keyPassword=$KEY_PASS" > android/key.properties
+          # 自检：keystore 能否用给定口令打开，避免到 gradle 阶段才报模糊错误
+          keytool -list -keystore android/app/upload-keystore.jks \
+            -storepass "$KS_PASS" >/dev/null
+          keytool -list -keystore android/app/upload-keystore.jks \
+            -storepass "$KS_PASS" -alias "$KEY_ALIAS" >/dev/null
+
+      - name: Verify dependency lockfile consistency
+        shell: bash
+        run: |
+          # 加固：仓库出现过 pubspec.yaml 声明的依赖在 pubspec.lock 里没有条目
+          # （flutter_miuix、url_launcher），说明 lock 从未重新解析，构建不可复现。
+          set -e
+          flutter pub get
+          if ! git diff --quiet -- pubspec.lock; then
+            echo "::error::pubspec.lock 与 pubspec.yaml 不一致，请在本地 flutter pub get 后提交更新后的 lock 文件"
+            git --no-pager diff --stat -- pubspec.lock
+            exit 1
+          fi
 
       - name: Build release APK
         run: |
-          flutter pub get
           flutter build apk --release
           flutter build apk --release --split-per-abi
+        env:
+          # -Dorg.gradle.project.<name> 是 Gradle 设置 project property 的写法，
+          # 对应 build.gradle.kts 里的 findProperty("quarklite.requireReleaseSigning")：
+          # 缺签名材料时直接失败，不允许静默退回 debug 签名
+          GRADLE_OPTS: >-
+            -Dorg.gradle.jvmargs=-Xmx4096M
+            -Dorg.gradle.project.quarklite.requireReleaseSigning=true
+
+      - name: Assert APK is release-signed (not debug)
+        shell: bash
+        run: |
+          # gradle 在缺少 key.properties 时会退回 debug 签名；
+          # 这里断言产物签名者不是 Android Debug，防止误发不可覆盖安装的包。
+          #
+          # 必须用 apksigner 而不是 keytool -printcert -jarfile：后者只能读到
+          # v1(JAR/META-INF) 签名，而 minSdk 24+ 的包默认不再生成 v1 块，
+          # 那种情况下 keytool 什么都不输出，grep 不匹配 → 断言会静默通过。
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          out=""
+          tool=""
+          if [ -n "${ANDROID_HOME:-}" ]; then
+            for d in "$ANDROID_HOME"/build-tools/*/; do
+              if [ -x "${d}apksigner" ]; then tool="${d}apksigner"; break; fi
+            done
+          fi
+          if [ -n "$tool" ]; then
+            out=$("$tool" verify --print-certs "$apk" 2>&1 || true)
+          else
+            echo "::warning::未找到 apksigner，退回 keytool -printcert -jarfile；"
+            echo "::warning::该方式仅在 APK 含 v1 签名时有效，可能给出假阴性结论"
+            out=$(keytool -printcert -jarfile "$apk" 2>&1 || true)
+          fi
+          echo "$out"
+          if [ -z "$(echo "$out" | tr -d '[:space:]')" ]; then
+            echo "::error::无法读取 APK 签名信息（apksigner/keytool 无输出），发布已中止"
+            exit 1
+          fi
+          if echo "$out" | grep -qi "CN=Android Debug"; then
+            echo "::error::产物使用了 debug 签名，发布已中止"
+            exit 1
+          fi
+          echo "APK 签名指纹（用于与上一版本比对，确认签名未更换）："
+          echo "$out" | grep -iE "SHA-?256" | head -4
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4

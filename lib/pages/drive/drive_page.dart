@@ -12,6 +12,8 @@ import '../../state/download_service.dart';
 import '../../state/upload_manager.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/format.dart';
+import '../../utils/net_guard.dart';
+import '../../utils/path_guard.dart';
 import '../../utils/permission.dart';
 import '../../utils/upload_picker.dart';
 import '../../widgets/empty_view.dart';
@@ -462,12 +464,13 @@ class _DrivePageState extends State<DrivePage>
         if (info.url.isEmpty) continue;
         final rel = pathByFid[info.fid] ?? '';
         // 保持网盘目录结构：下载到 根目录/相对路径/
-        final path = rel.isEmpty ? base : '$base/$rel';
+        final path = PathGuard.joinUnder(base, rel);
         final err = await DownloadService.addDirectUrl(
           url: info.url,
           fileName: info.fileName,
           path: path,
           cookie: cookie,
+          credentialScope: NetScope.quark,
           batchTotal: total,
         );
         if (err == null) added++;
@@ -787,6 +790,7 @@ class _DrivePageState extends State<DrivePage>
         url: info.url,
         fileName: info.fileName,
         cookie: cookie,
+        credentialScope: NetScope.quark,
       );
       if (err != null) throw Exception(err);
       _toast('已加入下载队列');

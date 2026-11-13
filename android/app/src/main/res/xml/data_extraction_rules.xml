@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12（API 31）起的备份/设备转移规则（加固引入）。
+
+  应用持有夸克 / 迅雷 / 123 网盘的会话凭据，任何一条被完整导出都等于
+  把账号会话交出去，因此云备份与近设备转移一律排除全部域。
+  allowBackup="false" 已经覆盖这些场景；本文件是 API 31+ 的显式声明，
+  两者并存是因为官方说明：部分厂商 ROM 上无法关闭近设备迁移，
+  多一道显式规则比依赖单一开关稳妥。
+
+  device-transfer 一侧同时排除 device_* 变体域（官方为 D2D 单列的域）。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="external" path="." />
+        <exclude domain="root" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="external" path="." />
+        <exclude domain="root" path="." />
+        <exclude domain="device_sharedpref" path="." />
+        <exclude domain="device_file" path="." />
+        <exclude domain="device_database" path="." />
+        <exclude domain="device_root" path="." />
+    </device-transfer>
+</data-extraction-rules>
