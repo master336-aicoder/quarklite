@@ -97,7 +97,7 @@ A-7 在 [.github/workflows/build.yml](file:///D:/qorder/quarklite/.github/workfl
   [lib/state/netdisk123_state.dart:368-374](file:///D:/qorder/quarklite/lib/state/netdisk123_state.dart#L368-L374)
   （对照 `git show 5ba21ac:lib/state/netdisk123_state.dart` 第 368-370 行）
 - 明文副本清理：[lib/core/credential_store.dart:81-100](file:///D:/qorder/quarklite/lib/core/credential_store.dart#L81-L100)，
-  启动时机见 [lib/app.dart:70-92](file:///D:/qorder/quarklite/lib/app.dart#L70-L92)
+  启动时机见 [lib/app.dart:69-91](file:///D:/qorder/quarklite/lib/app.dart#L69-L91)
 - 全仓库对 `FlutterSecureStorage` 的引用只剩一处（已 grep 核对）。
 
 **为什么不保留"读不到就退回 prefs"**：那个兜底本身就是漏洞主体——
@@ -158,7 +158,7 @@ A-7 在 [.github/workflows/build.yml](file:///D:/qorder/quarklite/.github/workfl
   [lib/pages/drive/xunlei_drive_page.dart:201](file:///D:/qorder/quarklite/lib/pages/drive/xunlei_drive_page.dart#L201)、
   [lib/pages/drive/netdisk123_drive_page.dart:313](file:///D:/qorder/quarklite/lib/pages/drive/netdisk123_drive_page.dart#L313)。
 - 引擎侧再拦一次（两个实现各自守）：
-  [lib/core/gopeed/gopeed_client.dart:48-50](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_client.dart#L48-L50)、
+  [lib/core/gopeed/gopeed_client.dart:51-53](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_client.dart#L51-L53)、
   [lib/core/gopeed/ios_background_download_client.dart:107-110](file:///D:/qorder/quarklite/lib/core/gopeed/ios_background_download_client.dart#L107-L110)。
 
 **为什么两层都做**：上层拼的是"目录 + 网盘内相对路径"，引擎层收到的是最终 `path`/`name`。
@@ -173,9 +173,14 @@ A-7 在 [.github/workflows/build.yml](file:///D:/qorder/quarklite/.github/workfl
 - 同一条 token 同时喂给引擎侧与客户端侧：
   Android 配置 `'apiToken'`（[lib/core/gopeed/gopeed_boot.dart:140](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_boot.dart#L140)）、
   Windows 命令行 `-T`（[lib/core/gopeed/gopeed_boot.dart:210](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_boot.dart#L210)）、
-  客户端 `Authorization: Bearer`（[lib/core/gopeed/gopeed_client.dart:14-21](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_client.dart#L14-L21)）。
-  Gopeed 侧只要 `ApiToken != ""` 就启用校验，接受 `X-Api-Token` 或 `Bearer`，
-  常量时间比较，未通过返回 401（见 §7 出处 S-2）。
+  客户端 `X-Api-Token` 请求头（[lib/core/gopeed/gopeed_client.dart:23](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_client.dart#L23)）。
+  Gopeed 侧只要 `ApiToken != ""` 就启用校验，**且只认 `X-Api-Token` 这一个头**；
+  `Authorization` 属于另一套 WebAuth（用户名/密码登录）机制，发 `Bearer <apiToken>` 一律 401
+  （见 §7 出处 S-2 与 §8.2 E-18）。比较是**普通字符串相等**，不是常量时间
+  （§8.2 E-19）；本机回环场景下时序差不可利用，但别把它当成抗时序设计。
+  **这条链路的运行级证据**：2026-11-21 在 Android 16 x86_64 模拟器上，加固后的原始代码
+  每一次 REST 调用都返回 401（`轮询任务列表失败: … status code of 401`），
+  把头改成 `X-Api-Token` 后 401 消失、引擎轮询正常，见 [build-and-env.md](build-and-env.md) §6.10。
 - 绑定地址仍是 `127.0.0.1`（[lib/core/gopeed/gopeed_boot.dart:136](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_boot.dart#L136)、
   [:208](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_boot.dart#L208)）。
   这一点必须保留：Gopeed 的 `-A` 默认值是 `0.0.0.0`（§7 出处 S-1），
@@ -323,7 +328,7 @@ A-7 在 [.github/workflows/build.yml](file:///D:/qorder/quarklite/.github/workfl
 | 编号 | 事实 | 出处 |
 |---|---|---|
 | S-1 | Gopeed `-A/-P/-T/-d/-u/-p` 定义与默认值（`-A` 默认 `0.0.0.0`，`-P` 默认 9999，`-T` 默认空串） | [cmd/web/flags.go](https://github.com/GopeedLab/gopeed/blob/main/cmd/web/flags.go) |
-| S-2 | `ApiToken != ""` 即启用校验；接受 `X-Api-Token` 或 `Authorization: Bearer`；常量时间比较；失败 401 | [pkg/rest/server.go](https://github.com/GopeedLab/gopeed/blob/main/pkg/rest/server.go) |
+| S-2 | `ApiToken != ""` 即启用校验；**只读 `X-Api-Token` 请求头**（`r.Header["X-Api-Token"]`），命中即放行、不匹配直接 401；不带该头时若未启用 WebAuth 则落到末尾 `writeUnauthorized` → 401；比较是 `==`，非常量时间；`Authorization: Bearer` 只在 `WebEnable && WebAuth != nil` 分支里作为登录态令牌解析 | [pkg/rest/server.go](https://github.com/GopeedLab/gopeed/blob/main/pkg/rest/server.go) 的鉴权中间件；本机固定源码副本 `D:/tools/dl/gopeed-src` 的 `pkg/rest/server.go:149`（开关）、`:185-195`（`X-Api-Token` 分支）、`:198-234`（WebAuth 分支，`Authorization` 在这里）、`:235`（兜底 401） |
 | S-3 | 端口打印语句 `Server start success on http://%s`（实际监听地址） | [cmd/server.go](https://github.com/GopeedLab/gopeed/blob/main/cmd/server.go) |
 | S-4 | 存储后端为 `go.etcd.io/bbolt`；bolt 官方 README："Bolt obtains a file lock on the data file so multiple processes cannot open the same database at the same time." | [pkg/download/storage.go](https://github.com/GopeedLab/gopeed/blob/main/pkg/download/storage.go)、[boltdb/bolt](https://github.com/boltdb/bolt) |
 | S-5 | `-P 0` 随机端口来自 Go `net.Listen` 语义（端口 0 由内核分配） | [pkg.go.dev/net#Listen](https://pkg.go.dev/net#Listen) |
@@ -390,10 +395,15 @@ A-7 在 [.github/workflows/build.yml](file:///D:/qorder/quarklite/.github/workfl
 | E-9 | "有 NSC 就够了" | NSC 自 API 24 生效；target ≤23 需再显式 `usesCleartextTraffic`；该属性在 target 38+ 被忽略，NSC 才是长期机制 | A-2、A-3 |
 | E-10 | "`requestLegacyExternalStorage` 提供旧式存储行为" | target 11+ 系统直接忽略该标志，全部文件访问只来自 `MANAGE_EXTERNAL_STORAGE` | A-9 |
 | E-11 | "`keytool -printcert -jarfile` 足以判定 APK 签名者" | 它读的是签名 JAR 块；无 v1 块时不输出内容，会让"不是 debug 签名"的判断静默走空 → CI 改用 `apksigner verify --print-certs` 并把"无输出"当失败 | A-13 |
-| E-12 | "`-T ''` 只是没设密码" | `-T` 是 API token，`ApiToken != ""` 才启用校验，与 BasicAuth 的 `-u/-p` 无关；因此 `Bearer` 头是有效的鉴权手段 | S-1、S-2 |
+| E-12 | "`-T ''` 只是没设密码" | `-T` 是 API token，`ApiToken != ""` 才启用校验，与 BasicAuth 的 `-u/-p` 无关（本行原写的"因此 `Bearer` 头是有效的鉴权手段"已被 E-18 推翻） | S-1、S-2 |
 | E-13 | "`-tags nosqlite` 会改变存储后端" | 上游构建脚本确实带这个 tag，但当前 `main` 没有对应 build guard，实际是 no-op | S-7 |
 | E-14 | "`upload/download-artifact@v4` 是当前版本" | 最新为 v7.0.2，v4 已是历史大版本 | operations.md §6 |
 | E-15 | "IPv6 内部地址判 `fd` 前缀即可" | `fc00::/7` 的本地分配位使其同时覆盖 `fc`/`fd` 两个前缀，只判 `fd` 会漏一半唯一本地地址 | A-12 |
+| E-16 | "装最新 stable Flutter 就能出本仓库的 Android 包" | 本仓库只能用 **Flutter 3.44.x**：3.50 的 `DependencyVersionChecker` 要求 Gradle ≥ 9.3.1 / AGP ≥ 9.1.1 / KGP ≥ 2.4.10，仓库固定的是 8.14 / 8.13.2 / 2.3.20 | [build-and-env.md](build-and-env.md) §6.8 B-1（外部口径来自 Flutter 3.50 SDK 的 `DependencyVersionChecker.kt:94-111`，属本机读到的 SDK 源码，未复核上游文档措辞） |
+| E-17 | "Inno Setup 是免费工具，产物无许可约束" | 官方口径是**商业用户被要求购买商业许可**（"regardless of the version being used"），未注册版本的编译器横幅会打印 `Non-commercial use only`；这是分发决策项，不是构建阻塞项 | [jrsoftware.org/isinfo.php](https://jrsoftware.org/isinfo.php)、[jrsoftware.org/isorder.php](https://jrsoftware.org/isorder.php)；落点见 [build-and-env.md](build-and-env.md) §6.5 |
+| E-18 | "客户端发 `Authorization: Bearer <apiToken>` 就能通过引擎鉴权"（本文 §4.4 与 `hardening-changelog.md` §5.4 修复说明的原口径） | **错**。Gopeed 的鉴权中间件只读 `X-Api-Token`；`Authorization` 头属于 WebAuth 登录态分支，本项目没开 WebAuth，所以带 `Bearer` 的请求全部走末尾兜底 → 401。表现为"引擎起来了但一个任务都下不动"，且只在运行时暴露，静态分析与单测全绿。已改为 `X-Api-Token`（[lib/core/gopeed/gopeed_client.dart:23](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_client.dart#L23)），并在 Android 16 模拟器上实测 401 消失 | S-2、[build-and-env.md](build-and-env.md) §6.10 |
+| E-19 | "引擎侧的 token 比较是常量时间的" | 上游是 `apiTokenHeader[0] == startCfg.ApiToken`，普通字符串相等，没有用 `subtle.ConstantTimeCompare`。本机回环 + 随机 token 场景下时序不构成可用侧信道，但不能记成"抗时序设计" | S-2（`pkg/rest/server.go:188`） |
+| E-20 | "`flutter analyze` 0 error + 单测全绿 = 加固后的引擎链路可用" | 0 error 只说明类型与语法成立。鉴权头写反（E-18）、更新弹窗取到 `MaterialApp` 之上的 `context`（`lib/app.dart` 的 `_QuarkLiteAppState.context` 没有 `Overlay` 祖先，`Overlay.of(..., rootOverlay: true)` 返回 null → 未捕获异常）这两类**只在真机/模拟器运行时才暴露**，两者都在全绿的仓库里存在过。凡是"跨异步间隙用 BuildContext"的地方，analyzer 已给 `use_build_context_synchronously` info 级提示，别只数 error | [build-and-env.md](build-and-env.md) §6.10、[hardening-changelog.md](hardening-changelog.md) §9 |
 
 ### 8.3 未复核项（诚实声明）
 
@@ -416,3 +426,29 @@ A-7 在 [.github/workflows/build.yml](file:///D:/qorder/quarklite/.github/workfl
    - `NetGuard` 与 `PathGuard` 是零依赖纯函数，跑过仓库内断言集 [tool/guard_selfcheck.dart](file:///D:/qorder/quarklite/tool/guard_selfcheck.dart)（实跑 **69 条**，首跑暴露 3 条 IP 别名绕过，已修 [net_guard.dart:92-93](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L92-L93)）；不依赖 Flutter，可离线重跑。
    - `LogRedact` 跑过 [test/log_redact_test.dart](file:///D:/qorder/quarklite/test/log_redact_test.dart)（9 条，`flutter test`）。**这组用例不是锦上添花**：它盯的正是「正则能不能构造出来」，而 [hardening-changelog.md §5.5](hardening-changelog.md) 缺陷 3 记录了此前的 `(?i)` 写法会让每条日志抛异常、脱敏形同不存在。
    另外全量 `flutter analyze` 已跑：0 error，相对基线 `5ba21ac` 新增问题 0 项。
+5. **（2026-11-13 第二轮追加）第 4 条的状态变化，以及仍然没被实测支撑的控制**：
+   本轮真的把包打出来了，所以"产物上实测"这一项**部分兑现**——
+   Windows 安装包静默安装 → 主程序启动 → 自动拉起同目录 `gopeed.exe` →
+   引擎打印 `Server start success on http://127.0.0.1:<port>` → 卸载干净，
+   这条链路证明了 §4.4 的**引擎启动与受控目录查找**在真实产物上成立（细节见
+   [build-and-env.md](build-and-env.md) §6.5）。
+   但**仍然没有任何运行级证据**覆盖下列控制，别把它们当成已验证：
+   凭据是否真的不再落明文（R-01/H1，需要读设备上的 XML 与 `flutter secure storage` 落盘）、
+   token 是否真的被引擎拒绝于未授权请求（R-03/H2，需要发一次不带 `Bearer` 的 API 调用）、
+   NSC 是否真的拒绝明文 HTTP（R-02/M4，需要抓包或明文库回归）、
+   WebView 注入与导航观测（R-09/M3）、日志脱敏在真实告警路径上的效果（R-10/L8）。
+   这些要么需要真机 + 可抓包环境，要么需要能用例化的桩；本轮一个都没做。
+   另外本轮 5 个 Android 产物全是 **debug 签名**（§6.3 坑 2），
+   所以 §4.8 的签名完整性控制到现在**仍只有代码级依据**。
+6. **（2026-11-21 第三轮追加）第 5 条里 R-03/H2 一项已兑现，但兑现方式比预期难看**：
+   在 Android 16 x86_64 模拟器（AVD `quark_api36`，WHPX 加速）上冷启动 APK 后，
+   引擎确实起来了（logcat 有 `libgojni.so` 加载成功），但**每一次** REST 调用都返回 401。
+   这等于用运行级证据同时证明了两件事：
+   - "未带合法令的请求会被引擎拒绝"成立（R-03/H2 的拒绝侧，第 5 条列为未验证的那半句）；
+   - 但拒绝的原因是我们**发错了头**（`Authorization: Bearer` 而非 `X-Api-Token`），
+     所以加固后的鉴权在真机上是**完全不工作**的，见 E-18。
+   修正后 401 消失、轮询正常，同一次运行还暴露了更新弹窗的 `Overlay.of` 空断言崩溃（E-20）。
+   仍未被任何运行级证据覆盖的：R-01/H1（凭据落盘形态）、R-02/M4（NSC 拒绝明文）、
+   R-09/M3（WebView 注入）、R-10/L8（真实告警路径上的脱敏）、以及**任何真实下载**
+   ——模拟器测试没有登录任何网盘，也没有落盘一个字节。操作过程与断言见
+   [build-and-env.md](build-and-env.md) §6.10。

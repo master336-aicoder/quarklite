@@ -20,7 +20,9 @@ class AppUpdate {
 class UpdateChecker {
   UpdateChecker._();
 
-  static const currentVersion = '1.3.2';
+  /// 必须与 pubspec.yaml 的 version 主版本段一致，否则每个正式包都会在启动时
+  /// 提示"发现新版本"（test/update_checker_version_test.dart 守住这条）。
+  static const currentVersion = '1.3.3';
   static const _latestReleaseUrl =
       'https://api.github.com/repos/ZXEB/quarklite/releases/latest';
   static final Dio _dio = Dio(BaseOptions(

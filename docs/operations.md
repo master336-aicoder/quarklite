@@ -157,7 +157,7 @@ $ANDROID_HOME/build-tools/<ver>/apksigner verify --print-certs app-release.apk
 | `引擎未正常启动: …` 且无端口 | stdout 未出现监听地址 | Gopeed 打印 `Server start success on http://127.0.0.1:<port>`，解析见 [lib/core/gopeed/gopeed_boot.dart:312-358](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_boot.dart#L312-L358) |
 | 任务列表空/历史丢失 | 第 2 次尝试会**删除** `gopeed` 存储目录 | bolt 数据库损坏时的自愈代价，见 [lib/core/gopeed/gopeed_boot.dart:278-286](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_boot.dart#L278-L286) |
 | 两个实例互相杀进程 | 多开 | 单实例锁已拦截（[lib/main.dart:19-22](file:///D:/qorder/quarklite/lib/main.dart#L19-L22)） |
-| 401 / 未授权 | 引擎带 token 而起，客户端没带 | 同一次会话的随机 token 同时喂给 `-T` 和 `Authorization: Bearer`（[lib/core/gopeed/gopeed_boot.dart:210](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_boot.dart#L210)、[lib/core/gopeed/gopeed_client.dart:14-20](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_client.dart#L14-L20)），重启应用即可重建 |
+| 401 / 未授权 | 客户端没带 `X-Api-Token`（引擎只认这一个头，`Authorization: Bearer` 一律 401） | 同一次会话的随机 token 同时喂给 `-T`/`'apiToken'` 与 `X-Api-Token` 头（[lib/core/gopeed/gopeed_boot.dart:210](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_boot.dart#L210)、[lib/core/gopeed/gopeed_client.dart:23](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_client.dart#L23)），重启应用即可重建。**这条不是理论风险**：2026-11-21 之前的代码就是发 `Bearer`，Android 上表现为"引擎起来了但所有下载失败"，日志特征 `轮询任务列表失败: … status code of 401`，见 [build-and-env.md](build-and-env.md) §6.10 |
 
 > bolt 只允许单进程持有数据库文件锁（官方 README："Bolt obtains a file lock on the
 > data file so multiple processes cannot open the same database at the same time"），
@@ -174,7 +174,7 @@ $ANDROID_HOME/build-tools/<ver>/apksigner verify --print-certs app-release.apk
 | `下载地址必须是 http/https 绝对地址` | 非 http(s)、缺协议或缺主机 | [lib/utils/net_guard.dart:103](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L103) |
 | `未声明凭据投递范围，拒绝附带凭据` | 调用方传了 `NetScope.none` 却带 cookie | [lib/utils/net_guard.dart:101](file:///D:/qorder/quarklite/lib/utils/net_guard.dart#L101) |
 | `仅支持 magnet: 或 btth: 链接` | 磁力输入框里粘了 http 地址 | [lib/state/download_service.dart:147](file:///D:/qorder/quarklite/lib/state/download_service.dart#L147) |
-| `下载路径非法: …` | 目标路径含上级引用 | [lib/core/gopeed/gopeed_client.dart:48-49](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_client.dart#L48-L49) |
+| `下载路径非法: …` | 目标路径含上级引用 | [lib/core/gopeed/gopeed_client.dart:51-52](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_client.dart#L51-L52) |
 
 误拦的排查顺序：先在日志里找该行的 `name=`，确认原始 URL；
 再确认它是否真是公网 CDN 直链。放宽规则必须走代码评审，**不要在 UI 层加旁路开关**——

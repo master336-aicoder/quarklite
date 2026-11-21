@@ -34,7 +34,7 @@ lib/
 - 单例入口：`AppState.I`、`XunleiState.I`、`Netdisk123State.I`、`DownloadManager.I`、
   `UploadManager.I`（[lib/state/app_state.dart:36-37](file:///D:/qorder/quarklite/lib/state/app_state.dart#L36-L37)，
   同一模式复制在各状态类中）。
-- 订阅点示例：[lib/app.dart:322](file:///D:/qorder/quarklite/lib/app.dart#L322)、
+- 订阅点示例：[lib/app.dart:331](file:///D:/qorder/quarklite/lib/app.dart#L331)、
   [lib/pages/downloads/downloads_page.dart:47](file:///D:/qorder/quarklite/lib/pages/downloads/downloads_page.dart#L47)、
   [lib/pages/drive/drive_page.dart:66](file:///D:/qorder/quarklite/lib/pages/drive/drive_page.dart#L66)。
 
@@ -80,9 +80,9 @@ drive_page (多选)
           ② GopeedEngine.ensureStarted()
           ③ AppState.effectiveDownloadDir() + 连接预算分摊
           ④ DownloadClient.create(path, name, url, headers)
-              · PathGuard.traversalRejection(path)     core/gopeed/gopeed_client.dart:48
-              · PathGuard.safeName(name)               core/gopeed/gopeed_client.dart:50
-              · Authorization: Bearer <会话 token>     core/gopeed/gopeed_client.dart:20
+              · PathGuard.traversalRejection(path)     core/gopeed/gopeed_client.dart:51
+              · PathGuard.safeName(name)               core/gopeed/gopeed_client.dart:53
+              · X-Api-Token: <会话 token>             core/gopeed/gopeed_client.dart:23
   → DownloadManager 轮询刷新 UI                      state/download_manager.dart:44
 ```
 
@@ -144,7 +144,7 @@ Dart 侧不拉进程，而是通过 `MethodChannel('quarklite.com/gopeed')` 调�
 
 ## 3. 启动编排（bootstrap）
 
-[lib/app.dart:44-68](file:///D:/qorder/quarklite/lib/app.dart#L44-L68) 的顺序是有意的：
+[lib/app.dart:44-67](file:///D:/qorder/quarklite/lib/app.dart#L44-L67) 的顺序是有意的：
 
 1. `AppLogger.init()` —— 必须最先，后续所有分支都要能落日志。
 2. `DownloadNotifier.init()`（10 秒超时，失败吞掉）—— 通知渠道不可用不影响主功能。
@@ -154,12 +154,17 @@ Dart 侧不拉进程，而是通过 `MethodChannel('quarklite.com/gopeed')` 调�
 4. `unawaited(_restoreSecondaryAccountsAndPurge())` —— 迅雷、123 依次恢复登录态，
    **全部完成后**才清理旧版本遗留在 SharedPreferences 的明文凭据；
    先恢复后清理是为了不和迁移读取抢跑
-   （[lib/app.dart:70-92](file:///D:/qorder/quarklite/lib/app.dart#L70-L92)）。
+   （[lib/app.dart:69-91](file:///D:/qorder/quarklite/lib/app.dart#L69-L91)）。
 5. `unawaited(_bootEngine())` —— 引擎后台拉起，同时把下载目录、`maxRunning`、
    连接预算一次性写进引擎配置
-   （[lib/app.dart:94-107](file:///D:/qorder/quarklite/lib/app.dart#L94-L107)）。
-6. `DownloadManager.startPolling()`，然后 `setState(_ready = true)`，首帧后再检查更新
+   （[lib/app.dart:93-106](file:///D:/qorder/quarklite/lib/app.dart#L93-L106)）。
+6. `DownloadManager.startPolling()`，然后 `setState(_ready = true)`
    （[lib/app.dart:61-66](file:///D:/qorder/quarklite/lib/app.dart#L61-L66)）。
+   **更新检查不在这里发起**：`_QuarkLiteAppState` 的 `context` 位于 `MaterialApp` 之上，
+   没有 `Overlay` 祖先，`Overlay.of(context, rootOverlay: true)` 会返回 null 并抛
+   `Null check operator used on a null value`（2026-11-21 模拟器实测到的崩溃）。
+   改由 `RootPage`（在 Navigator 之下）在自己的 `initState` 首帧回调里发起，
+   见 [lib/app.dart:247-254](file:///D:/qorder/quarklite/lib/app.dart#L247-L254)。
 
 `main()` 在 `runApp` 之前做两件事（[lib/main.dart:14-27](file:///D:/qorder/quarklite/lib/main.dart#L14-L27)）：
 Android 前台服务通信端口初始化、Windows 单实例锁。单实例锁的架构意义写明在注释里：
@@ -241,13 +246,24 @@ pages/state 层                    CredentialStore                     平台安
 
 1. **单例状态无依赖注入**，跨状态协作靠调用顺序约束（§3 第 4 步的"先恢复后清理"），
    改动 bootstrap 顺序容易引入竞态。
-2. **Windows 的 `gopeed.exe` 不由 CMake 打包**：`windows/CMakeLists.txt` 没有拷贝它，
-   用户需自行把引擎放到主程序目录（失败提示见
-   [lib/core/gopeed/gopeed_boot.dart:192-196](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_boot.dart#L192-L196)）。
-   这是可用性缺口，也是 §2.2 ① 必须限制查找目录的原因。
+2. **Windows 的 `gopeed.exe` 要构建方自备**：[windows/runner/CMakeLists.txt:43-50](file:///D:/qorder/quarklite/windows/runner/CMakeLists.txt#L43-L50)
+   只有在 `windows/resources/gopeed.exe` 存在时才把它拷进产物目录，而仓库不带该二进制、CI 也不编它，
+   所以"直接 clone 构建出来的 Windows 包"运行期仍会报"未找到 gopeed.exe"（失败提示见
+   [lib/core/gopeed/gopeed_boot.dart:192-196](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_boot.dart#L192-L196)）；编法与实测见 [build-and-env.md](build-and-env.md) §6.2。这仍是可用性缺口，也是 §2.2 ① 必须限制查找目录的原因。
 3. **接口层与业务层耦合于逆向细节**：123 的签名参数、`cashierEnv` 语义等实测结论
    只存在于代码注释（[lib/api/netdisk123_client.dart:355-375](file:///D:/qorder/quarklite/lib/api/netdisk123_client.dart#L355-L375)），
    官方一旦变更需要重新逆向，没有契约测试兜底。
 4. **任务态依赖 bolt 单写者**：引擎残留进程会持锁，因此启动前必须清理残留
    （[lib/core/gopeed/gopeed_boot.dart:75](file:///D:/qorder/quarklite/lib/core/gopeed/gopeed_boot.dart#L75)），
    这个清理逻辑是 Windows 平台特有四舍五入，不能简单移植。
+5. **命令式弹层只认"页面级 context"，这个约束此前没有写在任何地方**（2026-11-21 模拟器实测暴露）：
+   `MiuixOverlayPanel.show` 内部用 `Overlay.of(context, rootOverlay: true)`
+   （[lib/widgets/miuix_common.dart:52](file:///D:/qorder/quarklite/lib/widgets/miuix_common.dart#L52)），
+   而 `findRootAncestorStateOfType` **不含自身**，所以两类 context 必然拿到 null 并抛未捕获异常：
+   `QuarkLiteApp`/`MaterialApp` 之上的 context（已修，§3 第 6 步），以及
+   `navigatorKey.currentContext`——Navigator 自己的 Overlay 是它的**子**代，不是祖先。
+   后者仍留在 [lib/utils/window_close.dart:67-74](file:///D:/qorder/quarklite/lib/utils/window_close.dart#L67-L74)：
+   关闭窗口选"询问"时，Windows 上会走这条路径。**本轮未修、也未在 Windows 上实测**
+   （需要人工点 X 且把行为设成 ask），修法是把 `MiuixOverlayPanel` 的入参从 `BuildContext`
+   换成 `OverlayState`（`navigatorKey.currentState!.overlay`），或改用 `Navigator.push` 路由。
+   在此之前，Windows 的"关闭时询问"应视为**未验证且有已知崩溃风险**的能力。

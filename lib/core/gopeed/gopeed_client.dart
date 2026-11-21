@@ -17,10 +17,10 @@ class GopeedClient implements DownloadClient {
           connectTimeout: const Duration(seconds: 5),
           receiveTimeout: const Duration(seconds: 10),
           headers: {
-            // 字面量而非 dart:io 的 HttpHeaders.authorizationHeader：
-            // 本文件不依赖 dart:io，才能在没有平台插件的环境下被单测引用。
-            // HTTP 头名大小写不敏感，Gopeed 侧按标准头解析。
-            if (apiToken.isNotEmpty) 'Authorization': 'Bearer $apiToken',
+            // Gopeed 的 REST 中间件只认 X-Api-Token，不认 Authorization：
+            // 后者在引擎侧是 WebAuth（用户名/密码登录）专用的会话头。
+            // 参见 gopeed pkg/rest/server.go 的 authenticate 中间件。
+            if (apiToken.isNotEmpty) 'X-Api-Token': apiToken,
           },
         ));
 

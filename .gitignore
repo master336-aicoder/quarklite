@@ -66,3 +66,9 @@ third_party/
 /ios/Flutter/ephemeral/
 /ios/Flutter/Generated.xcconfig
 /ios/Flutter/flutter_export_environment.sh
+
+# 本地编译出的下载引擎产物：体积大（AAR 65MB / exe 41MB）、可由脚本重建，
+# 分发走 release 资产而不是仓库本身。见 docs/build-and-env.md §7 第 1 条。
+/android/app/libs/
+/windows/resources/
+/android/build/

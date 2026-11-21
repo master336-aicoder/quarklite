@@ -61,9 +61,8 @@ class _QuarkLiteAppState extends State<QuarkLiteApp> {
     DownloadManager.I.startPolling();
     if (mounted) {
       setState(() => _ready = true);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) unawaited(UpdateChecker.checkAndPrompt(context));
-      });
+      // 更新检查的弹窗需要根 Overlay，因此由 RootPage（在 Navigator 之下）自己发起，
+      // 见 _RootPageState.initState。
     }
   }
 
@@ -243,6 +242,16 @@ class _RootPageState extends State<RootPage> {
     UploadsPage(),
     MePage(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // 只有本页面在 Navigator/Overlay 之下，弹层才拿得到根 Overlay；
+    // 用 QuarkLiteApp 的 context 会让 Overlay.of 返回 null。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(UpdateChecker.checkAndPrompt(context));
+    });
+  }
 
   @override
   Widget build(BuildContext context) {

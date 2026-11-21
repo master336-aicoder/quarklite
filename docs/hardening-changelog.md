@@ -19,7 +19,7 @@
 | 2 | H2 | 本地引擎 API 无鉴权 | [gopeed_boot.dart:44-51](../lib/core/gopeed/gopeed_boot.dart#L44)、[gopeed_client.dart](../lib/core/gopeed/gopeed_client.dart) | 无 |
 | 3 | M5 | `gopeed.exe` 裸名加载 + 按映像名全局强杀 | [gopeed_boot.dart:300-306](../lib/core/gopeed/gopeed_boot.dart#L300)、[同文件 374-423](../lib/core/gopeed/gopeed_boot.dart#L374) | 见 §2.3.4 |
 | 4 | M1 | 凭据被投递到任意/内网主机（SSRF 相邻） | [net_guard.dart](../lib/utils/net_guard.dart)、[download_service.dart:33](../lib/state/download_service.dart#L33) | 可能拒绝内网自建源，见 §2.4.4 |
-| 5 | M2 | 下载路径穿越 / 文件名注入 | [path_guard.dart](../lib/utils/path_guard.dart)、[gopeed_client.dart:48-50](../lib/core/gopeed/gopeed_client.dart#L48) | 超长名被截断 |
+| 5 | M2 | 下载路径穿越 / 文件名注入 | [path_guard.dart](../lib/utils/path_guard.dart)、[gopeed_client.dart:51-53](../lib/core/gopeed/gopeed_client.dart#L51) | 超长名被截断 |
 | 6 | M3 | WebView 无导航校验即注入凭据 bridge | [xunlei_review_page.dart:60-91](../lib/pages/login/xunlei_review_page.dart#L60)、[netdisk123_pay_page.dart:32-40](../lib/pages/drive/netdisk123_pay_page.dart#L32) | 迅雷风控域变更需改配置 |
 | 7 | M4 | release 允许明文 HTTP | [AndroidManifest.xml:40](../android/app/src/main/AndroidManifest.xml#L40)、[network_security_config.xml](../android/app/src/main/res/xml/network_security_config.xml) | 明文源下载失败（预期） |
 | 8 | L8 | 日志泄露 cookie/token/URL 签名 | [app_logger.dart:43-131](../lib/utils/app_logger.dart#L43) | 日志可读性下降 |
@@ -61,7 +61,7 @@
 - [38](../lib/core/credential_store.dart#L38) `read` / [52](../lib/core/credential_store.dart#L52) `write`（`write(key, '')` 等价 delete）/ [65](../lib/core/credential_store.dart#L65) `delete`。
 - [81-100](../lib/core/credential_store.dart#L81) `purgeLegacyPlaintext`：升级后一次性清理历史明文键，返回清理条数。
 
-清理时机：[app.dart:70-92](../lib/app.dart#L70) `_restoreSecondaryAccountsAndPurge()` **先** `XunleiState.init()` / `Netdisk123State.init()`（这两步要从旧明文键迁移读取），**再** `purgeLegacyPlaintext([AppState, XunleiState, Netdisk123State] 的 legacyPlaintextKeys)` + `purgeCredentialDuplicates()`。若先清理后恢复，老用户会直接掉登录。
+清理时机：[app.dart:69-91](../lib/app.dart#L69) `_restoreSecondaryAccountsAndPurge()` **先** `XunleiState.init()` / `Netdisk123State.init()`（这两步要从旧明文键迁移读取），**再** `purgeLegacyPlaintext([AppState, XunleiState, Netdisk123State] 的 legacyPlaintextKeys)` + `purgeCredentialDuplicates()`。若先清理后恢复，老用户会直接掉登录。
 
 #### 2.1.4 兼容性（重要）
 
@@ -71,7 +71,7 @@
 
 #### 2.1.5 回滚
 
-`git checkout 5ba21ac -- lib/state/app_state.dart lib/state/xunlei_state.dart lib/state/netdisk123_state.dart` 并删除 `lib/core/credential_store.dart`（注意 [app.dart:83-88](../lib/app.dart#L83) 会引用它，需同步还原 `app.dart`）。
+`git checkout 5ba21ac -- lib/state/app_state.dart lib/state/xunlei_state.dart lib/state/netdisk123_state.dart` 并删除 `lib/core/credential_store.dart`（注意 [app.dart:82-87](../lib/app.dart#L82) 会引用它，需同步还原 `app.dart`）。
 
 ---
 
@@ -150,7 +150,7 @@
 
 | 加固前 | 加固后 |
 |---|---|
-| `gopeed_client.dart:33-58` `create()` 直接把 `name`、`path` 放进 `opts` | [gopeed_client.dart:48-50](../lib/core/gopeed/gopeed_client.dart#L48) 先 `traversalRejection(path)` 再 `safeName(name)` |
+| `gopeed_client.dart:33-58` `create()` 直接把 `name`、`path` 放进 `opts` | [gopeed_client.dart:51-53](../lib/core/gopeed/gopeed_client.dart#L51) 先 `traversalRejection(path)` 再 `safeName(name)` |
 | iOS 客户端同样直传 | [ios_background_download_client.dart:107-110](../lib/core/gopeed/ios_background_download_client.dart#L107) |
 | 目录树拼接 `'$base/$rel'`（`drive_page.dart:465`，另见 `490`、`927`） | [drive_page.dart:467](../lib/pages/drive/drive_page.dart#L467) `PathGuard.joinUnder(base, rel)`；[xunlei_drive_page.dart:201](../lib/pages/drive/xunlei_drive_page.dart#L201)、[netdisk123_drive_page.dart:313](../lib/pages/drive/netdisk123_drive_page.dart#L313) 同 |
 
@@ -337,7 +337,7 @@ SDK 从 `storage.flutter-io.cn` 取（先做四源 Range 测速，镜像 15.7 MB
 | # | 位置 | 症状 | 为什么之前没发现 | 修法 |
 |---|---|---|---|---|
 | 1 | [gopeed_boot.dart:409](../lib/core/gopeed/gopeed_boot.dart#L409) | `base64.encode(utf16.encode(script))` —— **`utf16` 在 `dart:convert` 里根本不存在**，`error - Undefined name 'utf16'`，整个 Windows 引擎启动路径编译不过 | 该文件 import Flutter，从没进过 `dart analyze` 的范围 | 新增 [_utf16LeBytes](../lib/core/gopeed/gopeed_boot.dart#L374) 按 `codeUnits` 手拼小端；已验证与 CPython `str.encode('utf-16-le')` **逐字节一致**（`abc` → `YQBiAGMA`），并经 PowerShell `[Text.Encoding]::Unicode.GetString` 解码回读一致；脚本是纯 ASCII（364 字符）不涉及代理对 |
-| 2 | [gopeed_client.dart:23](../lib/core/gopeed/gopeed_client.dart#L23) | `HttpHeaders.authorizationHeader` 来自 `dart:io`，而本文件**没有 import `dart:io`** → `error - Undefined name 'HttpHeaders'` | 同上 | 改用字面量 `'Authorization'`（HTTP 头名大小写不敏感），避免为一个常量把 `dart:io` 拖进这个可离线测试的文件 |
+| 2 | [gopeed_client.dart:23](../lib/core/gopeed/gopeed_client.dart#L23) | `HttpHeaders.authorizationHeader` 来自 `dart:io`，而本文件**没有 import `dart:io`** → `error - Undefined name 'HttpHeaders'` | 同上 | 改用字面量 `'Authorization'`（HTTP 头名大小写不敏感），避免为一个常量把 `dart:io` 拖进这个可离线测试的文件。**注意：这一格只解决了编译错误，头名本身选错了——引擎只认 `X-Api-Token`，2026-11-21 模拟器实测全量 401，已按 §9.2 缺陷 1 改为字面量 `'X-Api-Token'`；用字面量而不是 `dart:io` 常量的理由仍然成立** |
 | 3 | [app_logger.dart:104-117](../lib/utils/app_logger.dart#L104) | 两个脱敏正则写成内联 `(?i)`。**Dart 的 RegExp 是 ECMAScript 语法，不支持内联标志组**，构造时即抛 `FormatException: Invalid group`；而 [app_logger.dart:46](../lib/utils/app_logger.dart#L46) 在 `try` **之外**调用 `LogRedact.text` → 每条日志都抛异常，脱敏与落盘全废 | 分析器只把 `valid_regexps` 报成 **info**；纯静态「解析」阶段它是合法字符串，只有真正构造 `RegExp` 才炸 | 去掉 `(?i)`，改用 [RegExp 构造参数 `caseSensitive: false`](../lib/utils/app_logger.dart#L109)，并补 `test/log_redact_test.dart` 9 条行为断言把这类问题钉死在 `flutter test` 里 |
 
 **缺陷 3 的方法论教训**：`flutter analyze` 在本版本默认 `--fatal-infos` **on**（`flutter analyze --help` 实测两条 defaults to on），
@@ -397,3 +397,91 @@ git checkout 5ba21ac -- .github/workflows/build.yml .github/workflows/diag-gopee
 3. 为 `NetGuard.isInternalHost`、`PathGuard.safeName/joinUnder`、`LogRedact` 写单元测试（这三处是纯函数，最容易被测试锁住）。
 4. DNS rebinding（X-1）：若要彻底堵住，需要在解析后再判 IP，或改用 IP 直连校验；当前实现只在 host 字面量层面拦截。
 5. 依赖与 actions 供应链：SHA 锁定、依赖漏洞扫描、iOS CI（[operations.md](operations.md) §6）。
+
+---
+
+## 8. 第二轮验证：全平台出包实跑（2026-11-13，只增不改）
+
+§5.2 里"到今天仍然没做"的出包类验证，同日第二轮已在本机补做。
+**完整过程、命令、产物 SHA-256、镜像与许可口径都在 [build-and-env.md](build-and-env.md) §6**，
+本节只记加固结论层面的变化。
+
+### 8.1 §5.2 空缺的关闭状态
+
+| §5.2 原条目 | 现在的状态 |
+|---|---|
+| 「构建 APK/AAR/gopeed.exe」没做 | **已做**：`libgopeed.aar`（4 ABI）+ 4 个 APK + AAB + `gopeed.exe` + Windows 安装包全部产出，见 build-and-env.md §6.3/§6.5 |
+| 「GitHub Actions 实跑」没做 | **仍未做**（本仓库 CI 从未运行过） |
+| 「真机/模拟器」没做 | **仍未做**：本机 `adb devices` 无设备，Android 侧只有 `apksigner verify` + `aapt2 dump badging` 的静态核对 |
+| 「端到端行为一律未验证」 | **部分推进**：Windows 安装包静默安装 → 启动主程序 → 引擎自动拉起并打印 `Server start success on` → 卸载干净，这条链路成立。**登录、任务下载、凭据落盘位置等仍未点验** |
+
+### 8.2 本轮更正的加固结论（原文保留，以本节为准）
+
+1. **§2.3.4 末句"本仓库的 CMake 并没有打包 `gopeed.exe`"是错的**。
+   [windows/runner/CMakeLists.txt:43-50](../windows/runner/CMakeLists.txt#L43) 会在
+   `windows/resources/gopeed.exe` 存在时 POST_BUILD 拷入产物目录，实测产物目录里确实有它。
+   正确的风险描述是：**打包是有条件的**，仓库不带引擎、CI 不编引擎，所以"clone 即构建"
+   出来的 Windows 包仍然缺引擎 → §2.2 ① 限制查找目录的必要性不变。
+   [architecture.md](architecture.md) §7 第 2 条同步更正。
+2. **§2.9 的"缺签名就显式告警"在 Flutter CLI 下不成立**。
+   [android/app/build.gradle.kts:62-65](../android/app/build.gradle.kts#L62) 的 `logger.warn`
+   在 `flutter build apk --release` 的 stdout 里 0 次出现（Gradle 直接调用才可见）。
+   本机 5 个 Android 产物因此**全部静默打成了 debug 签名**（`CN=Android Debug`）。
+   → 这条加固需要加强：发版链路应默认带 `-Pquarklite.requireReleaseSigning=true`，
+   或在构建后用 `apksigner verify --print-certs` 校验签名者；具体见 build-and-env.md §6.3 坑 2。
+3. **§2.10 的 gomobile 版本口径要改**：脚本注释给的示例 `v0.8.2` 无法解析——
+   `golang.org/x/mobile` 不发语义化 tag，只能用伪版本（本轮用
+   `v0.0.0-20261011034528-197770444867`）。见 [scripts/build_libgopeed.sh:56-61](../scripts/build_libgopeed.sh#L56)、
+   build-and-env.md §6.8 B-3。
+4. **Flutter 版本被文档写得过松**：`pubspec.yaml:8` 的 `^3.12.2` 只约束 Dart，
+   3.50.0（Dart 3.14）能过 `pub get` 却过不了 Android 出包，因为它要求 Gradle ≥ 9.3.1 /
+   AGP ≥ 9.1.1 / KGP ≥ 2.4.10。本仓库固定的 8.14 / 8.13.2 / 2.3.20 只能配 Flutter 3.44.x。
+   见 build-and-env.md §6.8 B-1。
+
+### 8.3 本轮**没有**据此改动任何代码
+
+出包全程只动了 `pubspec.lock`（Flutter 3.44.9 重新解析的连带结果，7 处均为 transitive，
+**当前未提交**，理由见 build-and-env.md §6.6）。加固代码、CI 配置、构建脚本一行未改；
+§8.2 列的 4 条都还是**待办**，尤其第 2 条（签名告警被吞）是发布链路上的实质缺口。
+
+---
+
+## 9. 第三轮验证：Android 模拟器实跑与它暴露的 3 个缺陷（2026-11-21，只增不改）
+
+§8.3 说过上一轮"没有据此改动任何代码"。**这一轮改了**，因为把包装进模拟器跑起来之后，
+加固代码自己暴露的问题才第一次现形。本轮基线（回滚锚点）是 `c4d65d4`。
+
+### 9.1 怎么跑的
+
+`bash scripts/build_all.sh --apk-only --skip-engine` 出包 → `bash scripts/test_apk_emulator.sh`
+在 AVD `quark_api36`（pixel_6 / Android 16 x86_64 / WHPX 加速）上安装、冷启动、抓 logcat 断言。
+全过程、断言清单与三次运行结果见 [build-and-env.md](build-and-env.md) §6.10。
+
+### 9.2 三个缺陷与修复
+
+| # | 现象（实测证据） | 根因 | 修复落点 | 兼容性 |
+|---|---|---|---|---|
+| 1 | 引擎起来了（`libgojni.so` 加载 ok），但**每一次** REST 调用 401：`[download] 轮询任务列表失败: … status code of 401`、`[app] 后台启动引擎失败: … 401` | 加固时把会话 token 放进了 `Authorization: Bearer`，而 Gopeed 的鉴权中间件只读 `X-Api-Token`；`Authorization` 属于没启用的 WebAuth 分支 → 落到兜底 401。`flutter analyze` 0 error、`flutter test` 全绿都拦不住它 | [lib/core/gopeed/gopeed_client.dart:19-24](../lib/core/gopeed/gopeed_client.dart#L19)（头名与注释） | 无 API 变化；改的是请求头，Android/Windows 共用同一条链路，**修复前两端的引擎交互都是坏的** |
+| 2 | 冷启动 11 秒后 `Unhandled Exception: Null check operator used on a null value`，栈只到 `Overlay.of` ← `MiuixOverlayPanel.show (widgets/miuix_common.dart:52)` | `_QuarkLiteAppState` 在 `MaterialApp` **之上**，它的 `context` 没有 `Overlay` 祖先；`Overlay.of(..., rootOverlay: true)` 里的 `!` 直接炸。触发路径是启动检查更新弹窗——也就是说**"发现新版本"对话框从来没弹出来过** | 把发起点从 [lib/app.dart:62-66](../lib/app.dart#L62) 移到 `_RootPageState.initState`（[lib/app.dart:247-254](../lib/app.dart#L247)） | RootPage 只在 `_ready` 后创建一次，检查频次不变；截图确认弹窗已能正常渲染 |
+| 3 | 修完 #2 后弹窗出现，但内容是"发现新版本 1.3.3 / 当前版本 1.3.2"——**当前版本写错了** | `UpdateChecker.currentVersion` 是手写常量（`lib/core/update_checker.dart:25`），pubspec 升到 1.3.3 时没跟着改；后果是 1.3.3 正式包**每次启动都提示升级** | 常量改 1.3.3 + 新增 [test/update_checker_version_test.dart](../test/update_checker_version_test.dart) 断言"常量 == pubspec 的 version" | 该测试已反向验证过：把常量改回 1.3.2 会失败，不是空断言 |
+
+### 9.3 本轮**没有**修的地方
+
+- `lib/utils/window_close.dart:67` 的 `navigatorKey?.currentContext` 是**同一个缺陷类**
+  （Navigator 自己的 Overlay 是子孙不是祖先），Windows"关闭时询问"会走到它。
+  修它要改 `MiuixOverlayPanel` 的入参类型（`BuildContext` → `OverlayState`）或换 `Navigator.push`，
+  属结构改动，且本机无法自动化验证（要人工点 X 并把行为设成 ask）。
+  已记进 [architecture.md](architecture.md) §7 第 5 条，标为**未验证 + 已知风险**。
+- 5 个 Android 产物仍是 debug 签名；`--require-release-signing` 没配 `android/key.properties`，
+  §8.2 第 2 条（签名告警被 flutter 吞掉）依旧待办。
+- 没有登录任何网盘，没有产生一次真实下载。
+
+### 9.4 回滚
+
+```bash
+# 三处代码 + 一个新测试（本轮基线 c4d65d4）
+git checkout c4d65d4 -- lib/core/gopeed/gopeed_client.dart lib/app.dart lib/core/update_checker.dart
+rm -f test/update_checker_version_test.dart
+```
+单独回滚鉴权头会让 Android/Windows 的引擎交互回到"全部 401"；单独回滚 #2 会让启动崩溃回来。
+**要回滚就三条一起回**。

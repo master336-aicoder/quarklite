@@ -132,10 +132,16 @@ Quarklite 是一个跨平台的网盘下载客户端，把"官方网盘接口 + 
 - FR-6.4 关闭窗口行为四态：`ask_once` / `minimize` / `exit` / `ask`
   （[lib/state/app_state.dart:65-66](file:///D:/qorder/quarklite/lib/state/app_state.dart#L65-L66)、
   [lib/utils/window_close.dart](file:///D:/qorder/quarklite/lib/utils/window_close.dart)）。
+  **`ask` / `ask_once` 两态有已知崩溃风险且未实测**：弹层用的是 `navigatorKey.currentContext`，
+  该 context 没有 `Overlay` 祖先，见 [architecture.md](architecture.md) §7 第 5 条。
 - FR-6.5 通知权限与存储权限按需申请
   （[lib/utils/permission.dart](file:///D:/qorder/quarklite/lib/utils/permission.dart)）。
 - FR-6.6 检查更新：读取 GitHub Releases 最新版并提示，支持跳过该版本
-  （[lib/core/update_checker.dart:20-97](file:///D:/qorder/quarklite/lib/core/update_checker.dart#L20-L97)）。
+  （[lib/core/update_checker.dart:20-120](file:///D:/qorder/quarklite/lib/core/update_checker.dart#L20-L120)）。
+  本地版本号是**手写常量** `UpdateChecker.currentVersion`，必须跟 `pubspec.yaml` 的 `version` 一起改；
+  两者曾经漂移（常量停在 1.3.2、pubspec 已是 1.3.3），后果是每个正式包**每次启动都提示"发现新版本"**。
+  现在由 [test/update_checker_version_test.dart](file:///D:/qorder/quarklite/test/update_checker_version_test.dart) 断言守住，
+  发版流程见 [operations.md](operations.md) §2。
 
 ---
 
