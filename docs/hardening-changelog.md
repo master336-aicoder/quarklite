@@ -472,6 +472,11 @@ git checkout 5ba21ac -- .github/workflows/build.yml .github/workflows/diag-gopee
   修它要改 `MiuixOverlayPanel` 的入参类型（`BuildContext` → `OverlayState`）或换 `Navigator.push`，
   属结构改动，且本机无法自动化验证（要人工点 X 并把行为设成 ask）。
   已记进 [architecture.md](architecture.md) §7 第 5 条，标为**未验证 + 已知风险**。
+  > **2026-11-22 更正**：这条不是"本机无法自动化验证"——`WM_CLOSE` 可以用
+  > `Process.CloseMainWindow()` 发，对话框可以截图，按钮可以按坐标点。
+  > 当时判错的直接原因是共享的 `window_close_action` 存量值是 `exit`，
+  > 关闭请求在 `handleCloseRequest()` 就被分流成 `exitApp()`，根本没走到 `_askAndRun`，
+  > 于是测试只观察到"窗口退了"，误以为无法验证。已按 §9.5 修掉并实测。
 - 5 个 Android 产物仍是 debug 签名；`--require-release-signing` 没配 `android/key.properties`，
   §8.2 第 2 条（签名告警被 flutter 吞掉）依旧待办。
 - 没有登录任何网盘，没有产生一次真实下载。
@@ -485,3 +490,49 @@ rm -f test/update_checker_version_test.dart
 ```
 单独回滚鉴权头会让 Android/Windows 的引擎交互回到"全部 401"；单独回滚 #2 会让启动崩溃回来。
 **要回滚就三条一起回**。
+
+### 9.5 第四轮：主界面「关闭按钮点了没反应」的根因与修复（2026-11-22）
+
+用户报的是 Windows 真机症状：点标题栏 X 毫无反应。链条是三段，缺一处都不会是这个表现：
+
+1. 原生侧 `WM_CLOSE` **不关窗口**，只把请求转给 Dart 并 `return 0` 吞掉默认关闭
+   （[windows/runner/flutter_window.cpp:172-179](../windows/runner/flutter_window.cpp#L172)）。
+2. Dart 侧 `handleCloseRequest()` 按 `window_close_action` 分流；`ask`/`ask_once` 走 `_askAndRun`
+   （[lib/utils/window_close.dart:49-64](../lib/utils/window_close.dart#L49)）。
+3. `_askAndRun` 修复前用 `navigatorKey?.currentContext` 取 context（`efd634a` 版第 67 行），
+   而 `MiuixOverlayPanel.show` 里的 `Overlay.of(ctx, rootOverlay: true)` 用的是
+   `findRootAncestorStateOfType`——**不含自身**。Navigator 自己创建的 Overlay 是它的**子代**，
+   于是拿到 null、`!` 抛未捕获异常。异常在 `WM_CLOSE` 已被吞掉之后才发生，
+   结果是：窗口既不关、也不弹东西 = "点了没反应"。这与 §9.2 缺陷 #2 是同一个缺陷类。
+
+**修法**：把 `MiuixOverlayPanel` 的入口拆成两个——`show(context:)` 保持原签名、内部委托给新的
+`showInOverlay(overlay:)`（[lib/widgets/miuix_common.dart:49-87](../lib/widgets/miuix_common.dart#L49)）；
+只有 Navigator 级 context 的调用方直接传 `navigatorKey.currentState?.overlay`
+（[lib/utils/window_close.dart:70](../lib/utils/window_close.dart#L70)、[77](../lib/utils/window_close.dart#L77)），
+overlay 取不到时兜底最小化而不是抛异常。
+
+**实测**（构建产物 `build/windows/x64/runner/Release/quarklite.exe`，安装包哈希
+`856397bac063aaec01826d0d51cd7a480c6217e22736795532619e9642660e5a`）：
+
+| 步骤 | 结果 |
+|---|---|
+| 把 `window_close_action` 设为 `ask`（备份后改，测完按哈希还原） | 关闭请求才会进 `_askAndRun`；值留 `exit` 时上一轮就是这样误判的 |
+| `Process.CloseMainWindow()` 发 `WM_CLOSE` | 进程存活、窗口仍可见（说明没走 `exitApp()`） |
+| 截图 `D:\tools\close_test\after_close.png` | 「关闭 Quarklite / 关闭窗口后要继续在后台下载吗？ / 退出 / 最小化到托盘」正常渲染，遮罩下的主页正常 |
+| 按窗口相对坐标点「最小化到托盘」 | `IsWindowVisible=False`、`HasExited=False` → 走的是 `SW_HIDE` 分支，即托盘图标创建成功（[flutter_window.cpp:55-59](../windows/runner/flutter_window.cpp#L55)） |
+| 还原 `shared_preferences.json` | sha256 回到 `82068c10be7b09d200d58df33d56511a2b7254243b34da105ebb53ae6eb1b48c` |
+
+静态门禁：`flutter analyze` errors=0（36 issues，比修复前少 1 条——弹层拆分消掉了
+一处 `use_build_context_synchronously`）、`flutter test` `00:01 +12: All tests passed!`。
+
+**本轮仍未验证**：
+
+- 托盘图标的**恢复**路径（双击/右键「打开 Quarklite」→ `RestoreFromTray`）没有点过，
+  只验证了隐藏方向；通知区域图标在自动化里定位不稳，属人工项。
+- `ask_once` 的"记住选择"分支（`remember: true` → `saveAction`）没实测，
+  因为它会写用户真实的 `window_close_action`；与 `ask` 只差一次 `saveAction` 调用。
+- 用户**已安装**的是上游 1.3.2（注册表 `DisplayVersion 1.3.2`），不含本修复；
+  在其升级到新包之前，本机点 X 依旧无反应。
+- 该 pref 文件与已安装版共用同一 `com.quarklite` 目录，存量值是 `exit`。
+  无法判定这个值是用户自己选的还是本轮之前某次自动化点「退出」写进去的；
+  若要恢复默认询问，可在设置页把关闭行为改回"首次询问"。

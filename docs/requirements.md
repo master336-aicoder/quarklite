@@ -131,9 +131,14 @@ Quarklite 是一个跨平台的网盘下载客户端，把"官方网盘接口 + 
   （[lib/utils/single_instance.dart](file:///D:/qorder/quarklite/lib/utils/single_instance.dart)）。
 - FR-6.4 关闭窗口行为四态：`ask_once` / `minimize` / `exit` / `ask`
   （[lib/state/app_state.dart:65-66](file:///D:/qorder/quarklite/lib/state/app_state.dart#L65-L66)、
-  [lib/utils/window_close.dart](file:///D:/qorder/quarklite/lib/utils/window_close.dart)）。
-  **`ask` / `ask_once` 两态有已知崩溃风险且未实测**：弹层用的是 `navigatorKey.currentContext`，
-  该 context 没有 `Overlay` 祖先，见 [architecture.md](architecture.md) §7 第 5 条。
+  [lib/utils/window_close.dart:49-64](file:///D:/qorder/quarklite/lib/utils/window_close.dart#L49-L64)）。
+  ~~**`ask` / `ask_once` 两态有已知崩溃风险且未实测**：弹层用的是 `navigatorKey.currentContext`，
+  该 context 没有 `Overlay` 祖先，见 [architecture.md](architecture.md) §7 第 5 条。~~
+  **2026-11-22 已修并真机实测**：`ask` 态下发 `WM_CLOSE` 能正常画出询问对话框，
+  点「最小化到托盘」后窗口隐藏、进程存活（继续后台下载）；四态里 `minimize`/`exit`
+  此前已实测，`ask_once` 与 `ask` 只差一次"记住选择"的写盘，未单独实测。
+  根因、修法与逐条证据见 [hardening-changelog.md](hardening-changelog.md) §9.5。
+  注意：**已安装的上游 1.3.2 不含该修复**，升级前点 X 仍无反应。
 - FR-6.5 通知权限与存储权限按需申请
   （[lib/utils/permission.dart](file:///D:/qorder/quarklite/lib/utils/permission.dart)）。
 - FR-6.6 检查更新：读取 GitHub Releases 最新版并提示，支持跳过该版本

@@ -64,15 +64,18 @@ class WindowCloseHandler {
   }
 
   static Future<void> _askAndRun({required bool remember}) async {
-    final ctx = navigatorKey?.currentContext;
-    if (ctx == null) {
+    // 不能用 navigatorKey.currentContext：Navigator 自己的 Overlay 是它的子代，
+    // Overlay.of(..., rootOverlay: true) 只往上找，会拿到 null 并抛未捕获异常，
+    // 表现是点关闭按钮毫无反应。直接取根 Navigator 的 Overlay 来插弹层。
+    final overlay = navigatorKey?.currentState?.overlay;
+    if (overlay == null) {
       // 界面未就绪时兜底最小化
       await minimize();
       return;
     }
     final completer = Completer<String>();
-    await MiuixOverlayPanel.show(
-      context: ctx,
+    await MiuixOverlayPanel.showInOverlay(
+      overlay: overlay,
       builder: (_) => _CloseChoiceDialog(
         onExit: () {
           completer.complete('exit');

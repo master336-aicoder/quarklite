@@ -44,12 +44,22 @@ class MiuixOverlayPanel {
   static bool _closing = false;
   static bool _removalScheduled = false;
 
+  /// 用页面级 [context] 弹层。`context` 必须位于根 `Overlay` 之下，
+  /// 只有 Navigator 级 context 的调用方（如窗口关闭回调）改用 [showInOverlay]。
   static Future<void> show({
     required BuildContext context,
     required Widget Function(BuildContext dialogContext) builder,
+  }) =>
+      showInOverlay(
+        overlay: Overlay.of(context, rootOverlay: true),
+        builder: builder,
+      );
+
+  static Future<void> showInOverlay({
+    required OverlayState overlay,
+    required Widget Function(BuildContext dialogContext) builder,
   }) async {
     await _dismissActive();
-    final overlay = Overlay.of(context, rootOverlay: true);
     final completer = Completer<void>();
     final registry = MiuixPopupRegistry();
     late OverlayEntry entry;

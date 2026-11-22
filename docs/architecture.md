@@ -258,12 +258,21 @@ pages/state 层                    CredentialStore                     平台安
    这个清理逻辑是 Windows 平台特有四舍五入，不能简单移植。
 5. **命令式弹层只认"页面级 context"，这个约束此前没有写在任何地方**（2026-11-21 模拟器实测暴露）：
    `MiuixOverlayPanel.show` 内部用 `Overlay.of(context, rootOverlay: true)`
-   （[lib/widgets/miuix_common.dart:52](file:///D:/qorder/quarklite/lib/widgets/miuix_common.dart#L52)），
+   （[lib/widgets/miuix_common.dart:49-56](file:///D:/qorder/quarklite/lib/widgets/miuix_common.dart#L49-L56)），
    而 `findRootAncestorStateOfType` **不含自身**，所以两类 context 必然拿到 null 并抛未捕获异常：
    `QuarkLiteApp`/`MaterialApp` 之上的 context（已修，§3 第 6 步），以及
    `navigatorKey.currentContext`——Navigator 自己的 Overlay 是它的**子**代，不是祖先。
-   后者仍留在 [lib/utils/window_close.dart:67-74](file:///D:/qorder/quarklite/lib/utils/window_close.dart#L67-L74)：
-   关闭窗口选"询问"时，Windows 上会走这条路径。**本轮未修、也未在 Windows 上实测**
-   （需要人工点 X 且把行为设成 ask），修法是把 `MiuixOverlayPanel` 的入参从 `BuildContext`
-   换成 `OverlayState`（`navigatorKey.currentState!.overlay`），或改用 `Navigator.push` 路由。
-   在此之前，Windows 的"关闭时询问"应视为**未验证且有已知崩溃风险**的能力。
+   后者曾留在 [lib/utils/window_close.dart](file:///D:/qorder/quarklite/lib/utils/window_close.dart)
+   的 `_askAndRun`（修复前 `efd634a` 版第 67 行 `navigatorKey?.currentContext`），
+   表现是**点窗口 X 毫无反应**：异常发生在 `handleCloseRequest()` 之后，原生侧
+   `WM_CLOSE` 已经 `return 0` 吞掉了关闭，Dart 侧又没弹出任何东西
+   （[windows/runner/flutter_window.cpp:172-179](file:///D:/qorder/quarklite/windows/runner/flutter_window.cpp#L172-L179)）。
+   **2026-11-22 已修**：`MiuixOverlayPanel` 拆成 `show(context:)` 与
+   `showInOverlay(overlay:)` 两个入口（[lib/widgets/miuix_common.dart:49-87](file:///D:/qorder/quarklite/lib/widgets/miuix_common.dart#L49-L87)），
+   只有 Navigator 级 context 的调用方直接取 `navigatorKey.currentState?.overlay`
+   走后者（[lib/utils/window_close.dart:70](file:///D:/qorder/quarklite/lib/utils/window_close.dart#L70)、
+   [77](file:///D:/qorder/quarklite/lib/utils/window_close.dart#L77)），取不到 overlay 时兜底最小化。
+   Windows 真机实测（构建产物 `856397bac063…`，把 `window_close_action` 设为 `ask` 后
+   发 `WM_CLOSE`）：对话框正常画出、点「最小化到托盘」后窗口隐藏且进程存活，
+   截图与步骤见 [hardening-changelog.md](hardening-changelog.md) §9.5。
+   新增调用方**必须**先确认自己的 context 在根 Overlay 之下，否则改用 `showInOverlay`。

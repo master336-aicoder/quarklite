@@ -452,6 +452,7 @@ CI 会在 lock 与 `pubspec.yaml` 不一致时失败（§1.1），所以这份�
 | B-8 | 「`MSYS_NO_PATHCONV` 无关紧要」 | 在 Git Bash 下 `ISCC /DAppVersion=1.3.3` 会被 MSYS 当成路径转换，ISCC 报 `You may not specify more than one script filename`；必须 `MSYS_NO_PATHCONV=1` | 实测 `ISCC` 报错文案 |
 | B-9 | 「Windows runner 的 CMake 是标准模板、不用改」 | 打包引擎的 `GOPEED_BIN` 判断在 **[windows/runner/CMakeLists.txt](file:///D:/qorder/quarklite/windows/runner/CMakeLists.txt)**（`CMAKE_CURRENT_LIST_DIR` = `windows/runner`），**不在** [windows/CMakeLists.txt](file:///D:/qorder/quarklite/windows/CMakeLists.txt)。本轮之前的文档把两处混为一谈，说成"`windows/CMakeLists.txt` 不打包它"，因而得出"CMake 完全不打包引擎"的错误结论 | 见上方 B-7 的引用；本轮 §1.3 与 [architecture.md](architecture.md) §7 已按 runner 文件改写，**但未逐字给出行号**（文档编辑会移动行号，宁可不写也不写错） |
 | B-10 | 「本仓库的 CI 能出包」 | CI **一次都没跑过**，所以这句话在本轮之前和之后都还是推测；本轮连本地都发现"fresh clone 缺 wrapper"（§6.3 坑 1）这种会让 CI 直接失败的问题 | [.github/workflows/build.yml](file:///D:/qorder/quarklite/.github/workflows/build.yml)（同样**故意不给行号**：该文件本轮未复核内容，行号无法保证准确） |
+| B-11 | 「`FLUTTER_BIN=<路径>\flutter.bat` 直接能用」 | Git Bash 里 `command -v` 要求 POSIX 执行位，而 SDK 的 `flutter.bat` 实测权限是 `-rw-r--r--` → `require` 判它"缺少命令"并退出，**但同一个 .bat 手工执行完全正常**。脚本已改为：Windows 下 `command -v` 失败再退回到 `[ -f "$1" ]`。`GRADLE_BIN=gradle.bat` 同理 | 实测 `ls -l /d/tools/flutter-3.44.9/bin/flutter.bat` → `-rw-r--r--`；`command -v` 返回 1，紧接着 `…/flutter.bat --version` 正常打印 `Flutter 3.44.9` |
 
 ### 6.9 本轮**未**验证的项（不要当成已确认）
 
@@ -530,6 +531,40 @@ CI 会在 lock 与 `pubspec.yaml` 不一致时失败（§1.1），所以这份�
 `POST_NOTIFICATIONS` 弹窗）、`google_apis` 之外的镜像、真机。
 产品侧结论见 [hardening-changelog.md](hardening-changelog.md) §9。
 
+### 6.11 第四轮：一键脚本整理（2026-11-22，只增不改）
+
+§6.2 那条"一条命令版"承诺的能力，逐条对着代码复核后发现 6 处与实际行为不符或会咬人，
+全部改在 [scripts/build_all.sh](file:///D:/qorder/quarklite/scripts/build_all.sh) 里
+（**只动脚本，没动任何受版本控制的构建配置**）：
+
+| # | 整理前 | 后果 | 整理后（锚点） |
+|---|---|---|---|
+| 1 | `--help` 用 `sed -n '2,30p'` 打印头部注释 | 注释只到第 20 行，`--help` 会连着打出 `set -euo pipefail` 和 6 行变量赋值 | 改成 awk 截到 `set -euo` 前（[:56](file:///D:/qorder/quarklite/scripts/build_all.sh#L56)） |
+| 2 | 头里声明 `QUARKLITE_ANDROID_ABI` 可覆盖 ABI 集 | **全脚本没有任何一处读它**（`grep -c` = 1，只有那行注释），照它设了也不生效 | 删掉这行假承诺，改为在分包循环处注明"这三个是 `--split-per-abi` 的默认值，仓库无 `abiFilters`/`target-platform`"（[:273](file:///D:/qorder/quarklite/scripts/build_all.sh#L273)）；真要按 ABI 出包仍是 §7 待办 |
+| 3 | `require()` 只有 `command -v` | Windows 上 `FLUTTER_BIN=…\flutter.bat` 被误判"缺少命令"（.bat 无 POSIX 执行位），脚本第 68 行就退出 | Windows 下 `command -v` 失败再退回 `[ -f "$1" ]`（[:69-75](file:///D:/qorder/quarklite/scripts/build_all.sh#L69)）；`GRADLE_BIN=gradle.bat` 同理受益。勘误表 B-11 |
+| 4 | `flutter clean` 只写在 Android 分支里 | `--windows-only --clean` 静默不清；反过来 `--clean` 会连 `build/toolcache`（Gradle 缓存 + Gopeed 源码）一起删，之前没提示 | clean 提到引擎段之前、两端都生效，并把删缓存这件事写在日志里（[:113-118](file:///D:/qorder/quarklite/scripts/build_all.sh#L113)） |
+| 5 | 产物存在性检查写在 `if DO_ENGINE=1` **里面** | `--skip-engine` 时整段跳过 → 缺 `libgopeed.aar`/`gopeed.exe` 不报错，Android 撞到 Gradle 才失败、Windows 直接出一个没有引擎的安装包 | 两个检查移到 `DO_ENGINE` 之外，按平台必检（[:133](file:///D:/qorder/quarklite/scripts/build_all.sh#L133)、[:168](file:///D:/qorder/quarklite/scripts/build_all.sh#L168)） |
+| 6 | `VER_NAME` 的正则要求 `version:` 必须带 `+build` | `version: 1.3.3` 这种合法写法会解析成空串并 `die` | 改成 `+build` 可选（[:105](file:///D:/qorder/quarklite/scripts/build_all.sh#L105)）；末尾"未开严格签名"的告警也补了 `DO_ANDROID` 条件，`--windows-only` 不再乱报（[:359](file:///D:/qorder/quarklite/scripts/build_all.sh#L359)） |
+
+**验证**（`FLUTTER_BIN=/d/tools/flutter-3.44.9/bin/flutter.bat`）：
+
+| 动作 | 结果 |
+|---|---|
+| `bash -n scripts/build_all.sh` | 通过 |
+| `--help` | 只输出第 2-20 行注释，无代码泄漏 |
+| `version:` 三种写法（`1.3.3+1` / `1.3.3` / `1.4.0+20261201`） | 分别解析为 `1.3.3` / `1.3.3` / `1.4.0` |
+| 把 `windows/resources/gopeed.exe` 临时移走 + `--windows-only --skip-engine` | 在 `flutter build` **之前** `XX 缺少 …/gopeed.exe…`，退出码 1；移回后哈希仍是 `ef6d89c5…` |
+| 同样移走 + 不带 `--skip-engine` | `XX 缺少命令 go：编译 gopeed.exe 需要 Go 工具链`（本机 Go 不在 PATH，属预期） |
+| `--windows-only --skip-engine` 全量跑 | 出 `build/installer/quarklite-1.3.3-setup.exe`，23,176,158 B，`609f2a55e0c7d8bdcfce061ca9a59f41d45448666f5d229b3ad8d0cf0682b383`；便携目录 32 个文件 |
+
+安装包哈希与 §6.10 表里那一行不同，**不是应用代码变了**：自上次实测以来 `lib/` 一行未动，
+差异来自 ISCC 输出本身不是字节可复现的（编译时间戳进包头）。所以 §6.3/§6.5 的哈希表
+不能拿"同哈希"当回归判据，只能当同一次构建的记录。
+
+**本轮仍未验证**：`--apk-only` / `--aab` / `--clean` / `--cn-mirror` /
+`--require-release-signing` 五条路径本轮**一条都没实跑**（改动点 4、6 与这些开关有关，
+只做了静态复核）；Android 侧要等 Go + NDK + gomobile 齐备再回归。
+
 ---
 
 ## 7. 本轮暴露的构建侧待办（按优先级）
@@ -575,9 +610,21 @@ CI 会在 lock 与 `pubspec.yaml` 不一致时失败（§1.1），所以这份�
   (b) 引 `package_info_plus` 直接读包元数据（多一个插件依赖与平台实现）。
   当前只加了断言型护栏 [test/update_checker_version_test.dart](file:///D:/qorder/quarklite/test/update_checker_version_test.dart)，
   它能在漂移时让 `flutter test` 失败，但**不会自动同步**，改版本仍要人改两处。
-- 新增待办：**`lib/utils/window_close.dart:67` 的 `navigatorKey.currentContext` 与已修的
+- ~~新增待办：**`lib/utils/window_close.dart:67` 的 `navigatorKey.currentContext` 与已修的
   启动崩溃是同一个缺陷类**，Windows"关闭时询问"会走到它，本机无法自动化验证；
-  详见 [architecture.md](architecture.md) §7 第 5 条。
+  详见 [architecture.md](architecture.md) §7 第 5 条。~~
+  **2026-11-22 已修并已真机实测**，"无法自动化验证"这个判断本身是错的
+  （当时被共享 pref 的存量值 `exit` 误导，压根没走到询问分支）；
+  做法、截图与仍未覆盖的托盘恢复路径见 [hardening-changelog.md](hardening-changelog.md) §9.5。
+- 新增待办：**Windows 侧的 UI 断言只能靠截图 + 相对坐标点按**。Flutter 默认不把
+  语义树交给 UIA（没有辅助功能客户端时不构建），所以 `UIAutomationClient` 的
+  `FindAll(Descendants)` 取到的 Name 全是空串——用它断言"对话框出现了"会假失败。
+  可复用的验证脚本 [D:/tools/test_close.ps1](file:///D:/tools/test_close.ps1)（发
+  `WM_CLOSE` + 截图）与 [D:/tools/click_minimize.ps1](file:///D:/tools/click_minimize.ps1)
+  （按 `GetWindowRect` + DPI 换算点按钮）都在本机跑过，但**前者的 UIA 断言段是坏的**
+  （对话框明明画出来了，它仍报 `FAIL 关闭询问对话框没有出现`），只能看它的截图；
+  判定"是否出现"目前必须人眼看图。两个脚本都**在仓库外**，
+  要长期复用应收进 `scripts/` 并把断言改成截图/像素比对。
 - 新增待办：**模拟器只覆盖了合包 x86_64 一条 ABI**，arm64-v8a / armeabi-v7a 分包
   与真机（尤其 MIUI/华为这类前台服务与省电策略）仍未跑过；
   `scripts/test_apk_emulator.sh` 换 `--apk` 指到分包即可复用，但需要 arm64 镜像或真机。

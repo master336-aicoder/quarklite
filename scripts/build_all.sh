@@ -16,7 +16,6 @@
 #   FLUTTER_BIN / JAVA_HOME / ANDROID_HOME / GRADLE_BIN / ISCC_EXE
 #   GOPEED_VERSION(v1.9.3) GOPEED_COMMIT(必填，见 docs/build-and-env.md §3.2)
 #   GOMOBILE_VERSION(x/mobile 无 tag，必须给伪版本)
-#   QUARKLITE_ANDROID_ABI(universal,arm64-v8a,armeabi-v7a,x86_64)
 #
 # 前置工具链与踩坑记录见 docs/build-and-env.md §6；本脚本不修改任何受版本控制的构建配置。
 set -euo pipefail
@@ -54,7 +53,7 @@ while [ $# -gt 0 ]; do
     --cn-mirror)    CN_MIRROR=1 ;;
     --clean)        DO_CLEAN=1 ;;
     --allow-any-flutter) ALLOW_ANY_FLUTTER=1 ;;
-    -h|--help)      sed -n '2,30p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help)      awk 'NR>1 && /^set -euo/{exit} NR>1{print}' "${BASH_SOURCE[0]}" ; exit 0 ;;
     *) die "未知参数：$1（--help 看用法）" ;;
   esac
   shift
@@ -63,13 +62,19 @@ done
 # ---------------------------------------------------------------- 0. 环境
 [ -f "${REPO_ROOT}/pubspec.yaml" ] || die "找不到 pubspec.yaml，请在仓库根目录下执行"
 
-FLUTTER_BIN="${FLUTTER_BIN:-flutter}"
-require() { command -v "$1" >/dev/null 2>&1 || die "缺少命令 $1：$2"; }
-require "$FLUTTER_BIN" "装 Flutter 后加进 PATH，或用 FLUTTER_BIN=<绝对路径> 指定"
-require git "需要 git 拉取 Gopeed 引擎源码"
-
 OS="$(uname -s)"
 IS_WINDOWS=0; case "$OS" in MINGW*|MSYS*|CYGWIN*) IS_WINDOWS=1 ;; esac
+
+FLUTTER_BIN="${FLUTTER_BIN:-flutter}"
+require() {
+  command -v "$1" >/dev/null 2>&1 && return 0
+  # Windows 上 .bat 往往没有 POSIX 执行位（Git Bash 里 ls -l 显示 rw-r--r--），
+  # command -v 因此判它"不存在"，但 cmd 照样能跑——不能据此拒绝 FLUTTER_BIN/GRADLE_BIN。
+  [ "$IS_WINDOWS" = 1 ] && [ -f "$1" ] && return 0
+  die "缺少命令 $1：$2"
+}
+require "$FLUTTER_BIN" "装 Flutter 后加进 PATH，或用 FLUTTER_BIN=<绝对路径> 指定"
+require git "需要 git 拉取 Gopeed 引擎源码"
 
 if [ "$DO_WINDOWS" = 1 ] && [ "$IS_WINDOWS" != 1 ]; then
   warn "非 Windows（${OS}），跳过 Windows 出包"; DO_WINDOWS=0
@@ -97,7 +102,7 @@ if [ -n "$(cd "$REPO_ROOT" && git status --porcelain -- pubspec.lock)" ]; then
     出包可以继续，但**不要**顺手提交这份 lock（口径见 docs/build-and-env.md §6.6）"
 fi
 
-VER_NAME="$(sed -nE 's/^version: *([0-9][0-9.]*)\+.*/\1/p' "$REPO_ROOT/pubspec.yaml")"
+VER_NAME="$(sed -nE 's/^version: *([0-9][0-9.]*)(\+[0-9][0-9a-zA-Z.-]*)?$/\1/p' "$REPO_ROOT/pubspec.yaml")"
 [ -n "$VER_NAME" ] || die "读不到 pubspec.yaml 的 version"
 log "应用版本 ${VER_NAME}"
 
@@ -105,6 +110,13 @@ OUT_LIST=()
 record() { OUT_LIST+=("$1"); }
 
 # ---------------------------------------------------------------- 1. 引擎
+if [ "$DO_CLEAN" = 1 ]; then
+  # flutter clean 会删掉整个 build/，其中含本脚本的缓存目录 build/toolcache
+  # （Gradle 用户级缓存 + Gopeed 源码），所以 --clean 与 --cn-mirror 同时用等于重新下载一切。
+  log "flutter clean（连带清空 ${CACHE_DIR}，含 Gradle 缓存与引擎源码）"
+  ( cd "$REPO_ROOT" && "$FLUTTER_BIN" clean ) >/dev/null
+fi
+
 if [ "$DO_ENGINE" = 1 ] && [ "$DO_ANDROID" = 1 ]; then
   if [ -f "$AAR_OUT" ]; then
     log "libgopeed.aar 已存在，跳过编译（--skip-engine 可显式跳过）：$(du -h "$AAR_OUT" | cut -f1)"
@@ -115,7 +127,10 @@ if [ "$DO_ENGINE" = 1 ] && [ "$DO_ANDROID" = 1 ]; then
     log "编译 libgopeed.aar（scripts/build_libgopeed.sh，首次约 10-20 分钟）"
     ( cd "$REPO_ROOT" && bash scripts/build_libgopeed.sh ) || die "libgopeed.aar 编译失败；CI 之外的机器需自备 NDK 与 gomobile"
   fi
-  [ -f "$AAR_OUT" ] || die "缺少 $AAR_OUT：Android 构建无法进行（android/app/build.gradle.kts 用 files(\"libs/libgopeed.aar\")）"
+fi
+# 存在性检查放在 DO_ENGINE 之外：--skip-engine 时也要在跑 Gradle 之前拦下缺失产物
+if [ "$DO_ANDROID" = 1 ]; then
+  [ -f "$AAR_OUT" ] || die "缺少 $AAR_OUT：Android 构建无法进行（android/app/build.gradle.kts 用 files(\"libs/libgopeed.aar\")）；没有引擎产物时不能用 --skip-engine"
 fi
 
 if [ "$DO_ENGINE" = 1 ] && [ "$DO_WINDOWS" = 1 ]; then
@@ -148,7 +163,9 @@ if [ "$DO_ENGINE" = 1 ] && [ "$DO_WINDOWS" = 1 ]; then
     log "编译 gopeed.exe（-tags nosqlite,web）"
     ( cd "$GOPEED_SRC" && go build -tags nosqlite,web -ldflags="-s -w" -o "$EXE_OUT" github.com/GopeedLab/gopeed/cmd/web )
   fi
-  [ -f "$EXE_OUT" ] || die "缺少 $EXE_OUT：Windows 包能编出来但没有下载引擎"
+fi
+if [ "$DO_WINDOWS" = 1 ]; then
+  [ -f "$EXE_OUT" ] || die "缺少 $EXE_OUT：装完应用会报「未找到下载引擎」，不能出包；没有引擎产物时不能用 --skip-engine"
 fi
 
 # ---------------------------------------------------------------- 2. Gradle 前置
@@ -242,7 +259,6 @@ fi
 
 # ---------------------------------------------------------------- 3. Android
 if [ "$DO_ANDROID" = 1 ]; then
-  if [ "$DO_CLEAN" = 1 ]; then ( cd "$REPO_ROOT" && "$FLUTTER_BIN" clean ) >/dev/null; fi
   log "flutter build apk --release（universal）"
   ( cd "$REPO_ROOT" && "$FLUTTER_BIN" build apk --release )
   APK="${REPO_ROOT}/build/app/outputs/flutter-apk/app-release.apk"
@@ -252,6 +268,8 @@ if [ "$DO_ANDROID" = 1 ]; then
   if [ "$DO_SPLIT" = 1 ]; then
     log "flutter build apk --release --split-per-abi"
     ( cd "$REPO_ROOT" && "$FLUTTER_BIN" build apk --release --split-per-abi )
+    # 这三个是 flutter --split-per-abi 的默认 ABI（仓库里没有 abiFilters/target-platform），
+    # 换平台集要同时改这里与上面的构建命令。
     for abi in arm64-v8a armeabi-v7a x86_64; do
       f="${REPO_ROOT}/build/app/outputs/flutter-apk/app-${abi}-release.apk"
       [ -f "$f" ] && record "$f" || warn "缺少 ${abi} 分包：$f"
@@ -338,7 +356,7 @@ if [ "$DO_WINDOWS" = 1 ]; then
     "${REPO_ROOT}/build/windows/x64/runner/Release" \
     "$(find "${REPO_ROOT}/build/windows/x64/runner/Release" -type f | wc -l | tr -d ' ')"
 fi
-if [ "${STRICT_SIGNING:-0}" != 1 ]; then
+if [ "$DO_ANDROID" = 1 ] && [ "$STRICT_SIGNING" != 1 ]; then
   warn "本次未开 --require-release-signing：若缺 key.properties，出的是 debug 签名包"
 fi
 log "完成"
